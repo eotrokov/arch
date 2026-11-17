@@ -11,3 +11,4 @@ uses:
   - { resource: ya-disk, entities: [payment], purpose: Выгрузка отчётов }
 exposure:
   - { audience: office, via: [ingress] }
+owners: [ { role: techlead, name: Орлова Е., contact: "@orlova" } ]
