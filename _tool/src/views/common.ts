@@ -62,7 +62,7 @@ export class GraphBuilder {
     for (const c of n.classes ?? []) if (!cur.classes.includes(c)) cur.classes.push(c);
   }
 
-  addEdge(from: string, to: string, me: ModelEdge): void {
+  addEdge(from: string, to: string, me: ModelEdge, labelOverride?: string): void {
     if (from === to) return;
     const id = `${from}->${to}`;
     let acc = this.edges.get(id);
@@ -70,7 +70,7 @@ export class GraphBuilder {
       acc = { id, from, to, labels: [], modelEdgeIds: [], classes: [], cls: 'open' };
       this.edges.set(id, acc);
     }
-    const label = edgeLabel(me);
+    const label = labelOverride ?? edgeLabel(me);
     if (label && !acc.labels.includes(label)) acc.labels.push(label);
     if (!acc.modelEdgeIds.includes(me.id)) acc.modelEdgeIds.push(me.id);
     for (const c of this.idx.edge(me.id)) if (!acc.classes.includes(c)) acc.classes.push(c);

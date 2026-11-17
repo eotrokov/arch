@@ -3,16 +3,19 @@ import type { Scope, ViewGraph, ViewKind } from './types.js';
 import { containersView } from './containers.js';
 import { kubernetesView } from './kubernetes.js';
 import { databasesView } from './databases.js';
+import { firewallView } from './firewall.js';
+import { dataflowsView } from './dataflows.js';
 
-export { containersView, kubernetesView, databasesView };
+export { containersView, kubernetesView, databasesView, firewallView, dataflowsView };
 export { project } from './scope.js';
 
-/** Диспетчер разрезов. `firewall` и `dataflows` подключаются в Task 7. */
+/** Диспетчер разрезов. */
 export function buildView(model: Model, findings: Finding[], scope: Scope, view: ViewKind): ViewGraph {
   switch (view) {
     case 'containers': return containersView(model, findings, scope);
     case 'kubernetes': return kubernetesView(model, findings, scope);
     case 'databases': return databasesView(model, findings, scope);
-    default: throw new Error(`Разрез «${view}» ещё не реализован`);
+    case 'firewall': return firewallView(model, findings, scope);
+    case 'dataflows': return dataflowsView(model, findings, scope);
   }
 }
