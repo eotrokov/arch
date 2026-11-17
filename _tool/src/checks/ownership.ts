@@ -1,8 +1,5 @@
 import type { Finding, Model, ModelEdge } from '../model/types.js';
 
-/** Признак ребра-владения БД (создаётся резолвером для сервиса, объявившего базу). */
-export const DB_OWNER_REASON_PREFIX = 'владелец БД';
-
 export function checkOwnership(model: Model): Finding[] {
   const out: Finding[] = [];
   const topicPublishers = new Map<string, ModelEdge[]>();
@@ -14,7 +11,7 @@ export function checkOwnership(model: Model): Finding[] {
     const to = model.nodes[e.to];
     if (!from || !to) continue;
     if (e.kind === 'db' && from.kind === 'service' && to.kind === 'database') {
-      if (e.reason.startsWith(DB_OWNER_REASON_PREFIX)) push(dbOwners, to.id, e);
+      if (e.owner === true) push(dbOwners, to.id, e);
       if (from.system !== to.system || from.serviceName !== to.serviceName) {
         out.push({ rule: 'a1.foreign-db', level: 'error', nodeIds: [from.id, to.id], edgeIds: [e.id], file: e.file ?? from.file,
           message: `A-1: сервис ${from.id} обращается к БД ${to.id}, принадлежащей сервису ${to.ownerService ?? `${to.system}-${to.serviceName}`}.` });

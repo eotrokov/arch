@@ -98,7 +98,7 @@ describe('a1 / a2', () => {
   });
   it('two owners of a db', () => {
     const m = makeModel({ services: ['a-one', 'a-two'], nodes: [db], edges: [
-      { kind: 'db', from: 'a-one', to: db.id, reason: 'владелец БД x' }, { kind: 'db', from: 'a-two', to: db.id, reason: 'владелец БД x' }] });
+      { kind: 'db', from: 'a-one', to: db.id, owner: true }, { kind: 'db', from: 'a-two', to: db.id, owner: true }] });
     expect(rules(checkOwnership(m), 'a2.multiple-owners')).toHaveLength(1);
   });
 });

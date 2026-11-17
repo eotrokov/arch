@@ -267,7 +267,7 @@ export function resolveModel(tree: RawTree): { model: Model | null; errors: Load
   for (const { ctx, db, server } of dbOwnerEdges) {
     addEdge({
       kind: 'db', from: ctx.node.id, to: db.id, port: server.port, protocol: server.protocol, entities: [],
-      classification: db.classification!, role: 'rw', reason: `владелец БД ${db.label}`, file: ctx.file,
+      classification: db.classification!, role: 'rw', owner: true, reason: `владелец БД ${db.label}`, file: ctx.file,
     });
   }
   for (const { ctx, topic, entity, broker } of publishEdges) {

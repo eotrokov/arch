@@ -38,6 +38,8 @@ export interface ModelEdge {
   id: string; kind: EdgeKind; from: string; to: string; port?: number; protocol?: string;
   entities: string[]; classification: Classification; role?: 'rw' | 'ro' | 'migr';
   channel?: 'api' | 'topic' | 'cdc' | 'batch'; reason: string; file?: string;
+  /** db: неявное ребро владельца схемы (rw от объявившего её сервиса). */
+  owner?: boolean;
   /** use */
   bucket?: string; access?: 'ro' | 'rw'; purpose?: string;
   /** expose */

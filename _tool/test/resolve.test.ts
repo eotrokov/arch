@@ -44,6 +44,11 @@ describe('resolveModel demo', () => {
     expect(m.nodes['crm-orders']!.published).toBe(false);
   });
 
+  it('marks owner db edge only', () => {
+    expect(edge('db', 'crm-orders', 'db:crm_orders').owner).toBe(true);
+    expect(edge('db', 'crm-orders-job', 'db:crm_orders').owner).toBeUndefined();
+  });
+
   it('call edge', () => {
     expect(edge('call', 'crm-orders', 'pay-billing')).toMatchObject({ port: 9090, protocol: 'grpc', classification: 'pdn' });
   });
