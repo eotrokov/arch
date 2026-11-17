@@ -1,0 +1,8 @@
+name: notify
+type: worker
+segment: app
+cluster: k8s-prod-2
+consumes: [ { topic: crm.orders.order.created.v1 } ]
+uses:
+  - { resource: smtp-relay, entities: [order], purpose: Письма клиентам }
+  - { resource: ya-messenger, purpose: Алерты дежурным }

@@ -1,0 +1,10 @@
+name: orders
+type: ui
+segment: dmz
+cluster: k8s-prod-1
+calls: [ { target: crm-orders } ]
+uses:
+  - { resource: adfs, purpose: Вход пользователей (OIDC) }
+exposure:
+  - { audience: internet, via: [waf-main, ingress] }
+owners: [ { role: techlead, name: Кузнецов Д., contact: "@kuznetsov" } ]

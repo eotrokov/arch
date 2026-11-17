@@ -1,0 +1,3 @@
+name: Продажи
+owners: [ { role: owner, name: Иванов И., contact: "@ivanov" } ]
+links: [ { kind: wiki, url: https://wiki.company.ru/sales } ]

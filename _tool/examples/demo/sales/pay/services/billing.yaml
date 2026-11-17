@@ -1,0 +1,13 @@
+name: billing
+segment: app
+cluster: k8s-prod-2
+port: 9090
+protocol: grpc
+databases: [ { server: pg-shared, classification: kt } ]
+calls: [ { target: bank, entities: [payment] } ]
+exports: [ { channel: cdc, target: dwh, entities: [payment] } ]
+uses:
+  - { resource: ya-s3, bucket: archive, access: rw, entities: [payment] }
+  - { resource: ya-disk, entities: [payment], purpose: Выгрузка отчётов }
+exposure:
+  - { audience: office, via: [ingress] }

@@ -1,0 +1,4 @@
+code: crm
+name: CRM
+dbservers:
+  - { id: pg-x, engine: postgres, segment: db, port: 5432, hosts: [] }
