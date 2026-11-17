@@ -59,4 +59,12 @@ describe('project (scope)', () => {
     expect(p.visible('dbserver:pg-crm')).toEqual({ id: 'dbserver:pg-crm', muted: false, collapsed: false });
     expect(p.visible('dbserver:pg-shared')).toBeNull();
   });
+
+  it('R7: product-owned external is in scope and never collapsed', () => {
+    expect(project(m, { kind: 'product', id: 'pay' }).visible('ext:dwh')).toEqual({ id: 'ext:dwh', muted: false, collapsed: false });
+    expect(project(m, { kind: 'team', id: 'sales' }).visible('ext:dwh')).toEqual({ id: 'ext:dwh', muted: false, collapsed: false });
+    expect(project(m, { kind: 'company', expanded: [] }).visible('ext:dwh')).toEqual({ id: 'ext:dwh', muted: false, collapsed: false });
+    expect(project(m, { kind: 'service', id: 'pay-billing' }).visible('ext:dwh')).toEqual({ id: 'ext:dwh', muted: true, collapsed: false });
+    expect(project(m, { kind: 'product', id: 'crm' }).visible('ext:dwh')).toBeNull();
+  });
 });

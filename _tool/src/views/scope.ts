@@ -10,7 +10,7 @@ export function project(model: Model, scope: Scope, opts: { collapseBySegment?: 
   if (scope.kind === 'company') {
     const expanded = new Set(scope.expanded);
     for (const n of Object.values(nodes)) {
-      if (n.product && !expanded.has(n.product)) {
+      if (n.product && !expanded.has(n.product) && collapsible(n)) {
         put(n.id, { id: collapsedId(n, opts), muted: false, collapsed: true });
       } else {
         put(n.id, { id: n.id, muted: false, collapsed: false });
@@ -27,6 +27,7 @@ export function project(model: Model, scope: Scope, opts: { collapseBySegment?: 
     return false;
   };
   const inScope = (n: ModelNode): boolean => {
+    if (n.kind === 'external') return productInScope(n.product);
     if (n.kind !== 'service' && n.kind !== 'database' && n.kind !== 'topic') return false;
     if (scope.kind === 'service') return (n.kind === 'service' ? n.id : n.ownerService) === scope.id;
     return productInScope(n.product);
@@ -39,7 +40,7 @@ export function project(model: Model, scope: Scope, opts: { collapseBySegment?: 
   // соседи на один шаг по любым рёбрам, кроме expose (explicit — уровень сегментов, не узлов)
   const addNeighbour = (n: ModelNode | undefined) => {
     if (!n || result.has(n.id)) return;
-    if (!n.product || scope.kind === 'service' || productInScope(n.product)) {
+    if (!n.product || scope.kind === 'service' || productInScope(n.product) || !collapsible(n)) {
       put(n.id, { id: n.id, muted: true, collapsed: false });
     } else {
       put(n.id, { id: collapsedId(n, opts), muted: true, collapsed: true });
@@ -75,6 +76,11 @@ export function project(model: Model, scope: Scope, opts: { collapseBySegment?: 
   }
 
   return { visible: (id) => result.get(id) ?? null };
+}
+
+/** Внешние системы, платформа и акторы не сворачиваются в product:<code> (spec §8). */
+function collapsible(n: ModelNode): boolean {
+  return n.kind !== 'external' && n.kind !== 'platform' && n.kind !== 'actor';
 }
 
 function collapsedId(n: ModelNode, opts: { collapseBySegment?: boolean }): string {
