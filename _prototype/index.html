@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Архитектурные разрезы</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<script src="vendor/cytoscape.min.js"></script>
+<script src="vendor/elk.bundled.js"></script>
+<script src="vendor/cytoscape-elk.js"></script>
+<style>
+/* Layout: инженерный инструмент — дерево охвата слева, схема в центре, карточка справа, таблицы снизу */
+:root{
+  --bg:#f4f6f9; --panel:#ffffff; --fg:#17202c; --muted:#5b6779; --line:#d8dee8; --frame:#eef2f7;
+  --accent:#1f5fbf; --accent-soft:#e3ecfa;
+  --pdn:#c2265a; --kt:#b86e00; --open:#2f8a4f;
+  --err:#d1262c; --warn:#b86e00; --attn:#c99400;
+  --node:#ffffff; --node-line:#7b879a;
+  --font-ui:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0f141b; --panel:#161d27; --fg:#e4e9f1; --muted:#93a0b3; --line:#2a3444; --frame:#1b2431;
+  --accent:#6ea3ff; --accent-soft:#1d2b44;
+  --pdn:#ff6f9a; --kt:#f0a43a; --open:#5cc884;
+  --err:#ff5a5f; --warn:#f0a43a; --attn:#e8c14a;
+  --node:#1e2734; --node-line:#6c7a8f; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f141b; --panel:#161d27; --fg:#e4e9f1; --muted:#93a0b3; --line:#2a3444; --frame:#1b2431;
+  --accent:#6ea3ff; --accent-soft:#1d2b44;
+  --pdn:#ff6f9a; --kt:#f0a43a; --open:#5cc884;
+  --err:#ff5a5f; --warn:#f0a43a; --attn:#e8c14a;
+  --node:#1e2734; --node-line:#6c7a8f; color-scheme:dark}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{background:var(--bg);color:var(--fg);font:14px/1.45 var(--font-ui);display:flex;flex-direction:column;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:12px}
+header{display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px;padding-bottom:12px}
+h1{font-size:17px;font-weight:600;margin:0;text-wrap:balance}
+.tag{font:500 11px var(--font-mono);letter-spacing:.04em;text-transform:uppercase;color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:2px 6px}
+.tabs{display:flex;flex-wrap:wrap;gap:2px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:3px}
+.tabs button{font:inherit;font-size:13px;border:0;background:none;color:var(--muted);padding:6px 12px;border-radius:6px;cursor:pointer}
+.tabs button[aria-selected="true"]{background:var(--accent-soft);color:var(--accent);font-weight:600}
+.tabs button:focus-visible,button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.crumb{font:13px var(--font-mono);color:var(--muted);margin-left:auto}
+main{flex:1;min-height:0;display:grid;grid-template-columns:230px minmax(0,1fr) 300px;grid-template-rows:minmax(0,1fr) 220px;gap:10px}
+.pane{background:var(--panel);border:1px solid var(--line);border-radius:8px;min-width:0;min-height:0;overflow:auto}
+#tree{grid-column:1;grid-row:1/3;padding:10px}
+#graphWrap{grid-column:2;grid-row:1;position:relative;overflow:hidden}
+#cy{position:absolute;inset:0}
+#legend{position:absolute;left:10px;bottom:8px;display:flex;flex-wrap:wrap;gap:6px 12px;font-size:12px;color:var(--muted);background:var(--panel);padding:4px 8px;border-radius:6px;border:1px solid var(--line)}
+#legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+#card{grid-column:3;grid-row:1/3;padding:14px}
+#bottom{grid-column:2;grid-row:2;display:flex;flex-direction:column}
+.search{width:100%;font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);margin-bottom:8px}
+.tree ul{list-style:none;margin:0;padding-left:12px}
+.tree>ul{padding-left:0}
+.tree button{font:inherit;font-size:13px;border:0;background:none;color:var(--fg);text-align:left;width:100%;padding:3px 6px;border-radius:5px;cursor:pointer;display:flex;gap:6px;align-items:baseline}
+.tree button:hover{background:var(--frame)}
+.tree button[aria-current="true"]{background:var(--accent-soft);color:var(--accent);font-weight:600}
+.tree .k{font:11px var(--font-mono);color:var(--muted)}
+.lvl{font:500 11px var(--font-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:12px 0 4px}
+.card h2{font-size:16px;margin:0 0 2px;font-family:var(--font-mono);font-weight:500;word-break:break-all}
+.card .sub{color:var(--muted);font-size:12px;margin-bottom:10px}
+.card h3{font:500 11px var(--font-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:16px 0 6px}
+dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:3px 10px;margin:0;font-size:13px}
+dt{color:var(--muted)} dd{margin:0;font-family:var(--font-mono);font-size:12px;word-break:break-all;white-space:pre-line}
+.owner{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 8px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px}
+.owner .role{grid-column:1/3;font:11px var(--font-mono);color:var(--muted)}
+.owner .contact{font:12px var(--font-mono);color:var(--muted);word-break:break-all}
+.copy{font:11px var(--font-ui);border:1px solid var(--line);background:none;color:var(--muted);border-radius:4px;padding:1px 6px;cursor:pointer;align-self:center}
+.links{display:flex;flex-direction:column;gap:4px}
+.links a{color:var(--accent);text-decoration:none;font-size:13px;display:flex;gap:8px;align-items:baseline}
+.links a:hover{text-decoration:underline}
+.links .lk{font:11px var(--font-mono);color:var(--muted);min-width:64px}
+.inh{font-size:11px;color:var(--warn);margin-left:6px}
+.views{display:flex;flex-wrap:wrap;gap:4px}
+.views button{font:12px var(--font-ui);border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:5px;padding:3px 8px;cursor:pointer}
+.views button[disabled]{opacity:.4;cursor:default}
+.empty{color:var(--muted);font-size:13px}
+.btabs{display:flex;gap:2px;border-bottom:1px solid var(--line);padding:4px 6px 0;align-items:end}
+.btabs button{font:inherit;font-size:13px;border:0;border-bottom:2px solid transparent;background:none;color:var(--muted);padding:6px 10px;cursor:pointer}
+.btabs button[aria-selected="true"]{color:var(--fg);border-color:var(--accent)}
+.btabs .sp{flex:1}
+.btabs .copy{margin-bottom:6px}
+.bbody{overflow:auto;flex:1;min-height:0}
+table{border-collapse:collapse;width:100%;font-size:12px}
+th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+th{font-weight:500;color:var(--muted);position:sticky;top:0;background:var(--panel)}
+td.m{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+td.hosts{font-size:11px;line-height:1.5}
+td.r{white-space:normal;color:var(--muted)}
+.pill{display:inline-block;font:500 10px var(--font-mono);letter-spacing:.04em;text-transform:uppercase;padding:1px 6px;border-radius:10px;border:1px solid currentColor}
+.p-err{color:var(--err)} .p-warn{color:var(--warn)} .p-attn{color:var(--attn)} .p-intra{color:var(--muted)}
+.find{display:grid;grid-template-columns:auto auto minmax(0,1fr);gap:4px 10px;padding:6px 10px;border-bottom:1px solid var(--line);font-size:13px;cursor:pointer;align-items:baseline}
+.find:hover{background:var(--frame)}
+.find code{font:12px var(--font-mono);color:var(--muted)}
+@media (max-width:900px){
+  body{height:auto}
+  main{grid-template-columns:minmax(0,1fr);grid-template-rows:auto 60vh auto auto}
+  #tree,#card,#graphWrap,#bottom{grid-column:auto;grid-row:auto;max-height:none}
+  #bottom{min-height:260px}
+  .crumb{margin-left:0;width:100%}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Архитектурные разрезы</h1>
+  <span class="tag">прототип · демо-модель</span>
+  <nav class="tabs" id="viewTabs" role="tablist" aria-label="Разрез"></nav>
+  <span class="crumb" id="crumb"></span>
+</header>
+<main>
+  <aside class="pane tree" id="tree" aria-label="Охват"></aside>
+  <section class="pane" id="graphWrap"><div id="cy" aria-label="Схема"></div><div id="legend"></div></section>
+  <aside class="pane card" id="card" aria-label="Карточка элемента"></aside>
+  <section class="pane" id="bottom">
+    <div class="btabs" role="tablist">
+      <button id="bt-conn" aria-selected="true">Соединения</button>
+      <button id="bt-find" aria-selected="false">Нарушения</button>
+      <span class="sp"></span>
+      <button class="copy" id="copyTsv">Скопировать как TSV</button>
+    </div>
+    <div class="bbody" id="bbody"></div>
+  </section>
+</main>
+
+<script>
+/* ---------- демо-модель (в настоящем инструменте собирается из arch/**.yaml) ---------- */
+const P={env:'prod',domain:'company.ru',git:'https://gitlab.company.ru',registry:'registry.company.ru'};
+const SEGMENTS=[{id:'external',name:'Внешняя сеть',external:true},{id:'office',name:'Офисная сеть'},{id:'dmz',name:'DMZ'},{id:'app',name:'Сегмент приложений'},{id:'db',name:'Сегмент БД'},{id:'pdn',name:'Сегмент ПДн',sensitive:true},{id:'mgmt',name:'Управление'}];
+const CLUSTERS=[{id:'k8s-prod-1',name:'Прод-1'},{id:'k8s-prod-2',name:'Прод-2'}];
+const TEAMS=[{id:'sales',name:'Продажи',owners:[{role:'owner',name:'Иванов И.',contact:'@ivanov'}],links:[{kind:'wiki',url:'https://wiki.company.ru/sales'}]}];
+const PRODUCTS=[
+ {code:'crm',name:'CRM',team:'sales',criticality:'business-critical',
+  owners:[{role:'owner',name:'Петрова А.',contact:'petrova@company.ru'},{role:'architect',name:'Сидоров П.',contact:'@sidorov'}],
+  links:[{kind:'docs',url:'https://wiki.company.ru/crm/architecture',title:'Архитектура CRM'},{kind:'tracker',url:'https://jira.company.ru/projects/CRM',title:'Jira CRM'},{kind:'adr',url:'https://gitlab.company.ru/crm/crm-docs/-/tree/main/adr',title:'ADR'}]},
+ {code:'pay',name:'Платежи',team:'sales',criticality:'mission-critical',
+  owners:[{role:'owner',name:'Орлова Е.',contact:'orlova@company.ru'},{role:'security',name:'Белов С.',contact:'@belov'}],
+  links:[{kind:'docs',url:'https://wiki.company.ru/pay',title:'Платежи — обзор'},{kind:'tracker',url:'https://jira.company.ru/projects/PAY',title:'Jira PAY'}]}];
+const ENTITIES={order:{product:'crm',cls:'pdn'},payment:{product:'pay',cls:'kt'}};
+const SERVICES=[
+ {sys:'crm',name:'orders',type:'',seg:'app',cluster:'k8s-prod-1',port:8080,proto:'http',
+  owners:[{role:'techlead',name:'Кузнецов Д.',contact:'@kuznetsov'},{role:'oncall',name:'Дежурный CRM',contact:'#crm-oncall'}],
+  links:[{kind:'api',url:'https://gitlab.company.ru/crm/crm-orders/-/blob/main/api/openapi.yaml',title:'OpenAPI'},{kind:'dashboard',url:'https://grafana.company.ru/d/crm-orders',title:'Grafana'},{kind:'runbook',url:'https://wiki.company.ru/crm/orders/runbook',title:'Runbook'}]},
+ {sys:'crm',name:'orders',type:'ui',seg:'dmz',cluster:'k8s-prod-1',port:8080,proto:'http',
+  owners:[{role:'techlead',name:'Морозова К.',contact:'@morozova'}],links:[{kind:'docs',url:'https://wiki.company.ru/crm/orders-ui',title:'UI-гайд'}]},
+ {sys:'crm',name:'notify',type:'worker',seg:'app',cluster:'k8s-prod-2',port:8080,proto:'http',owners:[],links:[]},
+ {sys:'crm',name:'orders',type:'job',seg:'app',cluster:'k8s-prod-1',port:8080,proto:'http',
+  owners:[{role:'techlead',name:'Кузнецов Д.',contact:'@kuznetsov'}],links:[]},
+ {sys:'pay',name:'billing',type:'',seg:'app',cluster:'k8s-prod-2',port:9090,proto:'grpc',
+  owners:[{role:'techlead',name:'Волков Р.',contact:'@volkov'},{role:'devops',name:'Зайцев М.',contact:'@zaitsev'}],
+  links:[{kind:'api',url:'https://gitlab.company.ru/pay/pay-proto',title:'Контракты proto'},{kind:'alerts',url:'https://grafana.company.ru/alerting/pay',title:'Алерты'}]}];
+
+function derive(s){const id=s.sys+'-'+s.name+(s.type?'-'+s.type:'');return{
+  'Репозиторий':id,'Deployment':s.type==='job'?id+' (CronJob)':id,'Namespace':s.sys+'-'+P.env,'ServiceAccount':id,
+  'Ingress':(s.type==='ui'||s.type==='gw')?s.name+'.'+s.sys+'.'+P.domain:'—','ТУЗ':'svc-'+s.sys+'-'+s.name+'-'+P.env,
+  'Vault':s.sys+'/'+P.env+'/'+s.name,'Схема БД':s.sys+'_'+s.name,'Образ':P.registry+'/'+s.sys+'/'+id,'Consumer group':s.sys+'-'+s.name,
+  _repo:P.git+'/'+s.sys+'/'+id}}
+
+const N={};
+for(const s of SERVICES){const id=s.sys+'-'+s.name+(s.type?'-'+s.type:'');const names=derive(s);const prod=PRODUCTS.find(p=>p.code===s.sys);
+  const own=s.owners.length?s.owners:prod.owners;
+  N[id]={id,kind:'service',label:id,seg:s.seg,product:s.sys,cluster:s.cluster,stype:s.type||'backend',port:s.port,proto:s.proto,owner:id,
+    names,owners:own,inherited:!s.owners.length,links:[{kind:'repo',url:names._repo,title:id}].concat(s.links)};}
+const add=(o)=>N[o.id]=Object.assign({owners:[],links:[]},o);
+const DBS={
+ 'pg-crm':{id:'pg-crm',engine:'postgres',version:'16',seg:'pdn',port:5432,endpoint:'pg-crm.db.company.ru',scope:'продукт crm',
+   hosts:[{fqdn:'pg-crm-01.db.company.ru',role:'primary'},{fqdn:'pg-crm-02.db.company.ru',role:'replica'}],
+   owners:[{role:'dba',name:'Смирнов В.',contact:'@smirnov'}],links:[{kind:'dashboard',url:'https://grafana.company.ru/d/pg-crm',title:'Мониторинг pg-crm'},{kind:'runbook',url:'https://wiki.company.ru/dba/pg-crm',title:'Бэкапы и восстановление'}]},
+ 'pg-shared':{id:'pg-shared',engine:'postgres',version:'16',seg:'db',port:5432,scope:'общий',
+   hosts:[{fqdn:'pg-shared-01.db.company.ru',role:'primary'},{fqdn:'pg-shared-02.db.company.ru',role:'replica'},{fqdn:'pg-shared-03.db.company.ru',role:'replica'}],
+   owners:[{role:'dba',name:'Смирнов В.',contact:'@smirnov'}],links:[{kind:'dashboard',url:'https://grafana.company.ru/d/pg-shared',title:'Мониторинг pg-shared'}]}};
+const dbHosts=srv=>(srv.endpoint?[srv.endpoint]:[]).concat(srv.hosts.map(h=>h.fqdn));
+add({id:'db:crm_orders',kind:'database',label:'crm_orders',seg:DBS['pg-crm'].seg,product:'crm',owner:'crm-orders',port:DBS['pg-crm'].port,proto:'tcp',cls:'pdn',engine:'postgres',server:'pg-crm',owners:DBS['pg-crm'].owners,links:DBS['pg-crm'].links});
+add({id:'db:pay_billing',kind:'database',label:'pay_billing',seg:DBS['pg-shared'].seg,product:'pay',owner:'pay-billing',port:DBS['pg-shared'].port,proto:'tcp',cls:'kt',engine:'postgres',server:'pg-shared',owners:DBS['pg-shared'].owners,links:DBS['pg-shared'].links});
+add({id:'topic:crm.orders.order.created.v1',kind:'topic',label:'crm.orders.order.created.v1',seg:'app',product:'crm',owner:'crm-orders',port:9093,proto:'tcp',cls:'pdn'});
+const RES=[
+ ['kafka','kafka','Kafka','kafka.company.ru','app',9093,'tcp'],
+ ['ingress','ingress','Ingress','ingress.company.ru','dmz',443,'https'],
+ ['s3-main','s3','S3 (MinIO)','s3.company.ru','app',443,'https'],
+ ['ya-s3','s3','Yandex Object Storage','storage.yandexcloud.net','external',443,'https'],
+ ['smtp-relay','smtp','Почтовый relay','smtp.company.ru','app',587,'smtp'],
+ ['ya-disk','yandex-disk','Яндекс Диск','cloud-api.yandex.net','external',443,'https'],
+ ['ya-messenger','yandex-messenger','Яндекс Мессенджер','botapi.messenger.yandex.net','external',443,'https'],
+ ['waf-main','waf','WAF','waf.company.ru','dmz',443,'https'],
+ ['adfs','adfs','ADFS','adfs.company.ru','app',443,'https']];
+const RKIND={waf:'WAF',adfs:'ADFS · OIDC/SAML',kafka:'Kafka',ingress:'Ingress',s3:'S3',smtp:'SMTP','yandex-disk':'Яндекс Диск','yandex-messenger':'Яндекс Мессенджер'};
+for(const [id,k,l,ep,seg,port,proto] of RES)add({id:'platform:'+id,kind:'platform',rkind:k,label:l,endpoint:ep,seg,port,proto,
+  owners:[{role:'devops',name:'Платформенная команда',contact:'#platform'}],links:[{kind:'docs',url:'https://wiki.company.ru/platform/'+id,title:'Как подключиться'}]});
+add({id:'actor:internet',kind:'external',label:'Интернет · клиенты',seg:'external'});
+add({id:'actor:office',kind:'external',label:'Сотрудники',seg:'office'});
+add({id:'ext:bank',kind:'external',label:'Банк-партнёр',seg:'external',port:443,proto:'https'});
+add({id:'ext:dwh',kind:'external',label:'DWH',seg:'db',product:'pay',port:5432,proto:'tcp'});
+
+const CLS_ORDER={open:0,kt:1,pdn:2};
+const maxCls=(ents)=>ents.map(e=>ENTITIES[e].cls).reduce((a,b)=>CLS_ORDER[b]>CLS_ORDER[a]?b:a,'open');
+let ei=0;const E=[];
+function edge(kind,from,to,o={}){const t=N[to];const ents=o.entities||[];
+  E.push(Object.assign({id:'e'+(++ei),kind,from,to,port:o.port??t?.port,proto:o.proto??t?.proto,entities:ents,
+    cls:o.cls||(ents.length?maxCls(ents):(t?.cls||'open'))},o));}
+edge('expose','actor:internet','platform:waf-main',{reason:'Публикация crm-orders-ui в интернет: вход через WAF',audience:'internet',svc:'crm-orders-ui'});
+edge('expose','platform:waf-main','platform:ingress',{reason:'WAF → Ingress (orders.crm.company.ru)',svc:'crm-orders-ui'});
+edge('expose','platform:ingress','crm-orders-ui',{reason:'Ingress → crm-orders-ui',svc:'crm-orders-ui'});
+edge('use','crm-orders-ui','platform:adfs',{purpose:'Вход пользователей (OIDC)'});
+edge('use','crm-orders','platform:adfs',{purpose:'Проверка токенов (JWKS)'});
+edge('expose','actor:office','platform:ingress',{reason:'Публикация pay-billing для сотрудников (без WAF)',audience:'corporate',port:443,proto:'https',svc:'pay-billing'});
+edge('expose','platform:ingress','pay-billing',{reason:'Ingress → pay-billing (внутренняя публикация)',svc:'pay-billing'});
+edge('call','crm-orders-ui','crm-orders',{entities:['order']});
+edge('call','crm-orders','pay-billing',{entities:['order']});
+edge('db','crm-orders','db:crm_orders',{role:'rw'});
+edge('publish','crm-orders','topic:crm.orders.order.created.v1',{entities:['order']});
+edge('consume','crm-notify-worker','topic:crm.orders.order.created.v1',{entities:['order']});
+edge('db','crm-orders-job','db:crm_orders',{role:'migr'});
+edge('db','crm-notify-worker','db:crm_orders',{role:'ro'});
+edge('db','pay-billing','db:pay_billing',{role:'rw'});
+edge('call','pay-billing','ext:bank',{entities:['payment']});
+edge('export','pay-billing','ext:dwh',{entities:['payment'],channel:'cdc'});
+edge('use','crm-orders','platform:s3-main',{entities:['order'],bucket:'crm-orders-prod-files',access:'rw',purpose:'Вложения к заказам'});
+edge('use','crm-notify-worker','platform:smtp-relay',{entities:['order'],purpose:'Письма клиентам'});
+edge('use','crm-notify-worker','platform:ya-messenger',{purpose:'Алерты дежурным'});
+edge('use','pay-billing','platform:ya-s3',{entities:['payment'],bucket:'pay-billing-prod-archive',access:'rw',purpose:'Архив платёжных документов'});
+edge('use','pay-billing','platform:ya-disk',{entities:['payment'],purpose:'Выгрузка отчётов бухгалтерии'});
+const EXPLICIT=[{id:'x1',from:'mgmt',to:'app',port:9100,proto:'tcp',reason:'Мониторинг (node-exporter)'}];
+
+/* ---------- проверки ---------- */
+const sysSvc=id=>id.split('-').slice(0,2).join('-');
+const FIND=[];
+for(const e of E){
+  if(e.kind==='db'&&sysSvc(e.from)!==N[e.to].owner)FIND.push({rule:'a1.foreign-db',level:'error',msg:`${e.from} подключается к чужой БД ${N[e.to].label} (владелец ${N[e.to].owner}). Нарушение A-1: данные нужно получать через API или события.`,nodes:[e.from,e.to],edges:[e.id]});
+}
+for(const e of E)if(e.kind==='expose'&&e.audience==='internet'&&N[e.to].rkind!=='waf')FIND.push({rule:'security.no-waf',level:'error',msg:`Публикация в интернет без WAF: ${N[e.from].label} → ${N[e.to].label}`,nodes:[e.to],edges:[e.id]});
+for(const n of Object.values(N))if(n.kind==='service'&&n.inherited)FIND.push({rule:'meta.no-owner',level:'warning',msg:`У сервиса ${n.id} не указаны ответственные — показаны ответственные продукта.`,nodes:[n.id],edges:[]});
+const segOf=id=>SEGMENTS.find(s=>s.id===id);
+for(const e of E){const a=N[e.from],b=N[e.to];
+  if(segOf(b.seg).sensitive)FIND.push({rule:'attention.sensitive',level:'attention',msg:`Соединение в чувствительный сегмент «${segOf(b.seg).name}»: ${e.from} → ${b.label}`,nodes:[e.from,e.to],edges:[e.id]});
+  if(segOf(a.seg).external)FIND.push({rule:'attention.external',level:'attention',msg:`Входящее из внешней сети: ${a.label} → ${b.label}`,nodes:[e.from,e.to],edges:[e.id]});
+  if(segOf(b.seg).external&&e.entities.length&&e.cls!=='open')FIND.push({rule:'attention.egress',level:'attention',msg:`${{pdn:'ПДн',kt:'КТ'}[e.cls]} уходят наружу: ${e.from} → ${b.label} (${e.entities.join(', ')})`,nodes:[e.from,e.to],edges:[e.id]});
+  if(a.product&&b.product&&a.product!==b.product)FIND.push({rule:'attention.cross-product',level:'attention',msg:`Межпродуктовое соединение: ${a.label} → ${b.label}`,nodes:[e.from,e.to],edges:[e.id]});}
+const edgeFlags=id=>{const f=FIND.filter(x=>x.edges.includes(id));return{err:f.some(x=>x.level==='error'),attn:f.filter(x=>x.level==='attention').map(x=>x.rule.split('.')[1])}};
+
+/* ---------- состояние ---------- */
+const VIEWS=[['containers','Контейнеры'],['kubernetes','Kubernetes'],['firewall','Фаервол'],['databases','БД'],['dataflows','Потоки данных']];
+const S={view:'firewall',scope:{kind:'product',id:'crm'},expanded:new Set(),sel:'crm-orders',bottom:'conn'};
+
+/* ---------- охват ---------- */
+function inScope(n){const sc=S.scope;
+  if(sc.kind==='company')return true;
+  if(sc.kind==='team')return !!n.product&&PRODUCTS.find(p=>p.code===n.product).team===sc.id;
+  if(sc.kind==='product')return n.product===sc.id;
+  return n.id===sc.id||(n.owner===sc.id&&n.kind!=='service');}
+function neighbours(){const ins=new Set(Object.values(N).filter(inScope).map(n=>n.id));const nb=new Set();
+  for(const e of E){if(e.kind==='expose')continue;if(ins.has(e.from)&&!ins.has(e.to))nb.add(e.to);if(ins.has(e.to)&&!ins.has(e.from))nb.add(e.from);}
+  // путь публикации (интернет → WAF → ingress → сервис) показывается целиком для сервисов охвата
+  for(const e of E)if(e.kind==='expose'&&ins.has(e.svc)){for(const x of[e.from,e.to])if(!ins.has(x))nb.add(x);}
+  return{ins,nb};}
+function project(bySeg,noCollapse){const{ins,nb}=neighbours();const sc=S.scope;
+  return id=>{const n=N[id];const pk=p=>'product:'+p+(bySeg?'@'+n.seg:'');
+    if(sc.kind==='company'){if(n.product&&!S.expanded.has(n.product)&&!noCollapse)return{id:pk(n.product),muted:false,collapsed:true,product:n.product};return{id,muted:false};}
+    if(ins.has(id))return{id,muted:false};
+    if(nb.has(id)){if(sc.kind!=='service'&&n.product&&!noCollapse)return{id:pk(n.product),muted:true,collapsed:true,product:n.product};return{id,muted:true};}
+    return null;};}
+
+/* ---------- построение разрезов ---------- */
+const prodName=c=>PRODUCTS.find(p=>p.code===c).name;
+function build(){
+  const v=S.view, nodes=new Map(), edges=new Map(), rows=[];
+  const put=(id,d)=>{if(!nodes.has(id))nodes.set(id,Object.assign({id,classes:[]},d));return nodes.get(id);};
+  const frame=(id,label,parent)=>put(id,{label,kind:'frame',parent,classes:['frame']});
+  const link=(a,b,label,me,cls)=>{if(!a||!b||a===b)return;const k=a+'|'+b+'|'+label;const x=edges.get(k)||{id:'v'+edges.size,source:a,target:b,label,me:[],classes:new Set()};
+    x.me.push(me.id);const f=edgeFlags(me.id);if(f.err)x.classes.add('violation');f.attn.forEach(t=>x.classes.add('attn'));if(cls)x.classes.add('cls-'+cls);edges.set(k,x);};
+  const company=S.scope.kind==='company';
+
+  if(v==='containers'||v==='dataflows'){
+    const pr=project(false);
+    const keep=n=>v==='containers'||['service','topic','external'].includes(n.kind)||(n.kind==='platform'&&!['kafka','ingress'].includes(n.rkind));
+    const vis=id=>{const n=N[id];if(!keep(n))return null;const r=pr(id);if(!r)return null;
+      if(r.collapsed){const tf=company?frame('team:'+PRODUCTS.find(p=>p.code===r.product).team,'Команда «'+TEAMS[0].name+'»'):null;
+        put(r.id,{label:prodName(r.product)+'\n'+'продукт · свёрнут',kind:'product',parent:tf?.id,muted:r.muted,model:'product:'+r.product});return r.id;}
+      let parent;if(n.product){const tf=company?frame('team:'+PRODUCTS.find(p=>p.code===n.product).team,'Команда «'+TEAMS[0].name+'»').id:undefined;parent=frame('fp:'+n.product,'Продукт '+prodName(n.product),tf).id;}
+      put(id,{label:labelOf(n),kind:n.kind,parent,muted:r.muted,model:id,cls:n.cls});return id;};
+    for(const e of E){
+      if(e.kind==='expose'&&(!pr(e.svc)||pr(e.svc).muted))continue;
+      if(v==='dataflows'&&(e.kind==='db'||e.kind==='expose'||(e.kind==='use'&&!e.entities.length)))continue;
+      const a=vis(e.from),b=vis(e.to);
+      if(v==='containers')link(a,b,{call:e.proto,db:'sql · '+e.role,publish:'pub',consume:'sub',export:e.channel,expose:'вход · '+e.proto,use:e.bucket?'s3 · '+e.bucket+' · '+e.access:e.proto}[e.kind],e);
+      else{const ch={call:'API',publish:'топик',consume:'топик',export:(e.channel||'').toUpperCase(),use:RKIND[N[e.to].rkind]||'ресурс'}[e.kind];
+        const lbl=e.entities.join(', ')+' · '+ch; if(e.kind==='consume')link(b,a,lbl,e,e.cls);else link(a,b,lbl,e,e.cls);}
+    }
+    for(const n of Object.values(N))if(inScope(n))vis(n.id);
+  }
+
+  if(v==='kubernetes'){
+    for(const n of Object.values(N)){if(n.kind!=='service')continue;const r=project(false,true)(n.id);if(!r||r.muted)continue;
+      const cf=frame('cl:'+n.cluster,'Кластер '+n.cluster).id;const ns=frame('ns:'+n.cluster+'/'+n.names.Namespace,'namespace '+n.names.Namespace,cf).id;
+      put(n.id,{label:n.id+'\n'+(n.stype==='job'?'CronJob':'Deployment')+' · sa '+n.names.ServiceAccount,kind:n.stype==='job'?'cronjob':'deployment',parent:ns,model:n.id});
+      if(n.names.Ingress!=='—'){const h=put('host:'+n.names.Ingress,{label:n.names.Ingress,kind:'host',parent:ns,model:n.id});
+        edges.set('h'+n.id,{id:'h'+n.id,source:h.id,target:n.id,label:'443 → '+n.port,me:[],classes:new Set()});}}
+  }
+
+  if(v==='databases'){
+    const pr=project(false,true);
+    for(const e of E){if(e.kind!=='db')continue;const db=N[e.to];const rd=pr(db.id), rs=pr(e.from);if(!rd)continue;
+      const srv=DBS[db.server];const sf=frame('dbserver:'+srv.id,'Сервер СУБД '+srv.id+' · '+srv.engine+' '+srv.version+(srv.endpoint?' · '+srv.endpoint:'')+' · сегмент '+segOf(srv.seg).name).id;
+      nodes.get(sf).classes.push('srvframe');
+      for(const h of srv.hosts)put('host:'+h.fqdn,{label:h.fqdn+'\n'+h.role,kind:'dbhost',parent:sf,classes:[h.role],model:db.id});
+      put(db.id,{label:'схема '+db.label+' · владелец '+db.owner,kind:'frame',parent:sf,classes:['frame','dbframe'],model:db.id,muted:rd?.muted});
+      const u=put('user:'+db.label+'_'+e.role,{label:db.label+'_'+e.role,kind:'dbuser',parent:db.id,model:db.id});
+      const s=N[e.from];put(s.id,{label:labelOf(s),kind:'service',muted:rs?.muted,model:s.id});
+      link(s.id,u.id,e.role,e);}
+  }
+
+  if(v==='firewall'){
+    const pr=project(true);
+    const seg=id=>frame('seg:'+id,segOf(id).name+(segOf(id).sensitive?' · ПДн':'')+(segOf(id).external?' · внешняя':'')).id;
+    const vis=id=>{const n=N[id];const r=pr(id)||(n.kind==='platform'?{id,muted:true}:null);if(!r)return null;
+      if(r.collapsed){put(r.id,{label:prodName(r.product)+'\nпродукт · свёрнут',kind:'product',parent:seg(n.seg),muted:r.muted,model:'product:'+r.product});return r.id;}
+      put(id,{label:labelOf(n),kind:n.kind,parent:seg(n.seg),muted:r.muted,model:id});return id;};
+    const agg=new Map();
+    for(const e0 of E){if(e0.kind==='expose'&&(!pr(e0.svc)||pr(e0.svc).muted))continue;const e=(e0.kind==='publish'||e0.kind==='consume')?Object.assign({},e0,{to:'platform:kafka'}):e0;
+      const a=vis(e.from),b=vis(e.to);if(!a||!b)continue;
+      link(a,b,e.port+'/'+e.proto,e0);
+      const sa=N[e.from].seg,sb=N[e.to].seg;const k=[a,b,e.port,e.proto].join('|');
+      const tn=N[e.to];const r=agg.get(k)||{from:nodes.get(a).label.split('\n')[0],fs:sa,to:nodes.get(b).label.split('\n')[0],ts:sb,hosts:tn.kind==='database'?dbHosts(DBS[tn.server]):tn.endpoint?[tn.endpoint]:[],port:e.port,proto:e.proto,reasons:[],intra:sa===sb,attn:new Set()};
+      r.reasons.push(e0.reason||(e0.purpose?e0.purpose+(e0.bucket?' ('+e0.bucket+')':''):`${e0.kind} ${e0.from} → ${N[e0.to].label}`));edgeFlags(e0.id).attn.forEach(t=>r.attn.add(t));if(edgeFlags(e0.id).err)r.err=true;agg.set(k,r);}
+    for(const x of EXPLICIT){const a=seg(x.from),b=seg(x.to);edges.set(x.id,{id:x.id,source:a,target:b,label:x.port+'/'+x.proto,me:[],classes:new Set(['explicit'])});
+      agg.set(x.id,{from:'сегмент',fs:x.from,to:'сегмент',ts:x.to,hosts:[],port:x.port,proto:x.proto,reasons:[x.reason],intra:false,attn:new Set()});}
+    rows.push(...[...agg.values()].sort((p,q)=>(p.fs+p.ts).localeCompare(q.fs+q.ts)||p.port-q.port));
+  }
+  // родительские рамки без детей убрать
+  const used=new Set([...nodes.values()].map(n=>n.parent).filter(Boolean));
+  for(const e of edges.values()){used.add(e.source);used.add(e.target);}
+  for(const [id,n] of nodes){if(n.kind==='frame'&&!used.has(id)&&!n.classes.includes('dbframe'))nodes.delete(id);}
+  return{nodes:[...nodes.values()],edges:[...edges.values()].filter(e=>nodes.has(e.source)&&nodes.has(e.target)),rows};
+}
+function labelOf(n){
+  const k={service:n.stype==='backend'?'сервис':n.stype,database:'БД '+(n.engine||''),topic:'топик Kafka',platform:RKIND[n.rkind]||'ресурс',external:'внешняя система'}[n.kind];
+  return n.label+'\n'+k;}
+
+/* ---------- отрисовка ---------- */
+const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const hasElk=typeof cytoscapeElk!=='undefined';
+if(hasElk)cytoscape.use(cytoscapeElk);
+let cy;
+function style(){
+  return[
+   {selector:'node',style:{'background-color':css('--node'),'border-width':1.5,'border-color':css('--node-line'),label:'data(label)',color:css('--fg'),
+     'font-family':'IBM Plex Sans, system-ui, sans-serif','font-size':11,'text-wrap':'wrap','text-valign':'center','text-halign':'center',
+     shape:'round-rectangle',width:'label',height:'label',padding:10}},
+   {selector:'node[kind="database"]',style:{shape:'barrel'}},
+   {selector:'node[kind="topic"]',style:{shape:'tag','padding':12}},
+   {selector:'node[kind="platform"]',style:{shape:'hexagon','padding':14}},
+   {selector:'node[kind="external"]',style:{'border-style':'dashed'}},
+   {selector:'node[kind="product"]',style:{'border-width':2.5,'border-color':css('--accent')}},
+   {selector:'node[kind="cronjob"]',style:{'border-style':'dashed'}},
+   {selector:'node[kind="host"]',style:{shape:'round-rectangle','font-family':'IBM Plex Mono, monospace','font-size':10,'background-color':css('--accent-soft'),'border-color':css('--accent')}},
+   {selector:'node[kind="dbuser"]',style:{'font-family':'IBM Plex Mono, monospace','font-size':10}},
+   {selector:'node[kind="dbhost"]',style:{shape:'barrel','font-family':'IBM Plex Mono, monospace','font-size':10}},
+   {selector:'node.primary',style:{'border-width':2.5,'border-color':css('--accent')}},
+   {selector:'.srvframe',style:{'border-width':2,'border-color':css('--node-line'),'background-color':css('--bg')}},
+   {selector:'.frame',style:{'background-color':css('--frame'),'background-opacity':1,'border-color':css('--line'),'border-width':1,shape:'round-rectangle',
+     'text-valign':'top','text-halign':'center','text-margin-y':-4,'font-size':11,'font-weight':600,color:css('--muted'),padding:16}},
+   {selector:'node[id ^= "seg:"]',style:{'border-width':1.5}},
+   {selector:'.sensitive',style:{'border-color':css('--pdn'),'border-style':'dashed'}},
+   {selector:'.muted',style:{opacity:.45}},
+   {selector:'.nviol',style:{'border-color':css('--err'),'border-width':3}},
+   {selector:'.nwarn',style:{'border-color':css('--warn'),'border-width':2.5}},
+   {selector:'edge',style:{width:1.6,'line-color':css('--node-line'),'target-arrow-color':css('--node-line'),'target-arrow-shape':'triangle','curve-style':'bezier',
+     label:'data(label)','font-size':10,'font-family':'IBM Plex Mono, monospace',color:css('--muted'),'text-background-color':css('--panel'),'text-background-opacity':1,'text-background-padding':2}},
+   {selector:'edge.cls-pdn',style:{'line-color':css('--pdn'),'target-arrow-color':css('--pdn'),width:2.4}},
+   {selector:'edge.cls-kt',style:{'line-color':css('--kt'),'target-arrow-color':css('--kt'),width:2.4}},
+   {selector:'edge.cls-open',style:{'line-color':css('--open'),'target-arrow-color':css('--open'),width:2.4}},
+   {selector:'edge.attn',style:{'line-color':css('--attn'),'target-arrow-color':css('--attn'),'line-style':'dashed'}},
+   {selector:'edge.explicit',style:{'line-style':'dotted'}},
+   {selector:'edge.violation',style:{'line-color':css('--err'),'target-arrow-color':css('--err'),width:3,'line-style':'solid'}},
+   {selector:':selected',style:{'border-color':css('--accent'),'border-width':3,'line-color':css('--accent'),'target-arrow-color':css('--accent')}},
+   {selector:'.hl',style:{'underlay-color':css('--accent'),'underlay-opacity':.25,'underlay-padding':6}}];}
+function render(){
+  const g=build();
+  const nodeFind=id=>FIND.filter(f=>f.nodes.includes(id));
+  const els=g.nodes.map(n=>{const cl=[...n.classes];if(n.muted)cl.push('muted');
+      if(n.id.startsWith('seg:')&&segOf(n.id.slice(4)).sensitive)cl.push('sensitive');
+      if(n.model&&!['frame','dbuser','dbhost','host'].includes(n.kind)){const f=nodeFind(n.model);if(f.some(x=>x.level==='error'))cl.push('nviol');else if(f.some(x=>x.level==='warning'))cl.push('nwarn');}
+      return{group:'nodes',data:{id:n.id,label:n.label,kind:n.kind,parent:n.parent,model:n.model},classes:cl.join(' ')};})
+    .concat(g.edges.map(e=>({group:'edges',data:{id:e.id,source:e.source,target:e.target,label:e.label,me:e.me},classes:[...e.classes].join(' ')})));
+  if(!cy){cy=cytoscape({container:document.getElementById('cy'),style:style(),wheelSensitivity:.25,minZoom:.2,maxZoom:2.5});
+    cy.on('tap','node',ev=>{const m=ev.target.data('model');if(m){S.sel=m;renderCard();}});
+    cy.on('dbltap','node[kind="product"]',ev=>{const m=ev.target.data('model').slice(8);if(S.scope.kind==='company'){S.expanded.add(m);render();}});
+    cy.on('tap',ev=>{if(ev.target===cy){}});}
+  cy.elements().remove();cy.add(els);
+  const lay=hasElk?{name:'elk',nodeDimensionsIncludeLabels:true,fit:true,padding:30,
+      elk:{algorithm:'layered','elk.direction':'RIGHT','elk.hierarchyHandling':'INCLUDE_CHILDREN','elk.spacing.nodeNode':28,'elk.layered.spacing.nodeNodeBetweenLayers':70,'elk.padding':'[top=28,left=16,bottom=16,right=16]'}}
+    :{name:'cose',animate:false,padding:30,nodeDimensionsIncludeLabels:true};
+  cy.layout(lay).run();
+  markSel();
+  renderTabs();renderTree();renderCard();renderBottom(g);renderLegend();renderCrumb();
+}
+function markSel(){if(!cy)return;cy.elements().unselect();cy.nodes().filter(n=>n.data('model')===S.sel&&n.data('kind')!=='frame'&&n.data('kind')!=='dbuser').select();}
+function themeRefresh(){if(cy)cy.style(style());}
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change',themeRefresh);
+new MutationObserver(themeRefresh).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
+
+/* ---------- панели ---------- */
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function renderTabs(){const t=document.getElementById('viewTabs');t.innerHTML=VIEWS.map(([k,l])=>`<button role="tab" aria-selected="${S.view===k}" data-v="${k}">${l}</button>`).join('');
+  t.querySelectorAll('button').forEach(b=>b.onclick=()=>{S.view=b.dataset.v;if(S.view==='firewall')S.bottom='conn';render();});}
+function renderCrumb(){const sc=S.scope;const txt=sc.kind==='company'?'Компания'+(S.expanded.size?' · раскрыто: '+[...S.expanded].join(', '):' · двойной клик по продукту раскрывает его'):
+  sc.kind==='team'?'Команда '+sc.id:sc.kind==='product'?'Продукт '+sc.id:'Сервис '+sc.id;document.getElementById('crumb').textContent=txt;}
+let q='';
+function renderTree(){const el=document.getElementById('tree');const cur=(k,id)=>S.scope.kind===k&&(k==='company'||S.scope.id===id);
+  const m=s=>!q||s.toLowerCase().includes(q);
+  let h=`<input class="search" id="q" type="search" placeholder="Поиск по имени" value="${esc(q)}" aria-label="Поиск по имени"><div class="lvl">Охват</div><ul>`;
+  h+=`<li><button data-k="company" aria-current="${cur('company')}">Вся компания</button></li>`;
+  for(const t of TEAMS){h+=`<li><button data-k="team" data-id="${t.id}" aria-current="${cur('team',t.id)}"><span class="k">команда</span>${esc(t.name)}</button><ul>`;
+    for(const p of PRODUCTS.filter(p=>p.team===t.id)){const svcs=Object.values(N).filter(n=>n.kind==='service'&&n.product===p.code&&m(n.id));
+      if(!m(p.name)&&!m(p.code)&&!svcs.length)continue;
+      h+=`<li><button data-k="product" data-id="${p.code}" aria-current="${cur('product',p.code)}"><span class="k">${p.code}</span>${esc(p.name)}</button><ul>`;
+      for(const s of svcs)h+=`<li><button data-k="service" data-id="${s.id}" aria-current="${cur('service',s.id)}">${esc(s.id)}</button></li>`;
+      h+='</ul></li>';}
+    h+='</ul></li>';}
+  el.innerHTML=h+'</ul>';
+  el.querySelectorAll('button[data-k]').forEach(b=>b.onclick=()=>{S.scope=b.dataset.k==='company'?{kind:'company'}:{kind:b.dataset.k,id:b.dataset.id};
+    if(b.dataset.k==='service'||b.dataset.k==='product')S.sel=b.dataset.id.includes('-')?b.dataset.id:S.sel;render();});
+  const qi=document.getElementById('q');qi.oninput=()=>{q=qi.value.toLowerCase();const pos=qi.selectionStart;renderTree();const n=document.getElementById('q');n.focus();n.setSelectionRange(pos,pos);};
+}
+function presentIn(id){const save=S.view,res=[];for(const[k]of VIEWS){S.view=k;if(build().nodes.some(n=>n.model===id))res.push(k);}S.view=save;return res;}
+const ROLE={dba:'DBA',owner:'Владелец продукта',techlead:'Техлид',architect:'Архитектор',analyst:'Аналитик',devops:'DevOps',security:'ИБ',oncall:'Дежурство'};
+const LK={repo:'репо',docs:'доки',api:'API',adr:'ADR',wiki:'wiki',tracker:'трекер',dashboard:'дашборд',alerts:'алерты',runbook:'runbook',ci:'CI',other:'ссылка'};
+function renderCard(){const el=document.getElementById('card');markSel();
+  let id=S.sel, h='';
+  if(id&&id.startsWith('product:')){const p=PRODUCTS.find(x=>x.code===id.slice(8));
+    h=`<h2>${p.code}</h2><div class="sub">Продукт «${esc(p.name)}» · ${p.criticality}</div>`+people(p.owners,false)+links(p.links);
+    h+=`<h3>Действия</h3><div class="views"><button id="openP">Открыть продукт</button></div>`;el.innerHTML=h;
+    document.getElementById('openP').onclick=()=>{S.scope={kind:'product',id:p.code};render();};return;}
+  const n=N[id];if(!n){el.innerHTML='<p class="empty">Выберите элемент на схеме, чтобы увидеть его атрибуты, ответственных и ссылки.</p>';return;}
+  const sub={service:'Сервис · '+n.stype,database:'База данных · '+n.engine,topic:'Топик Kafka',platform:'Ресурс · '+(RKIND[n.rkind]||n.rkind),external:'Внешняя система'}[n.kind];
+  h=`<h2>${esc(n.label)}</h2><div class="sub">${sub}${n.product?' · продукт '+n.product:''}</div>`;
+  const attrs=[['Сегмент',segOf(n.seg).name],['Порт',n.port+'/'+n.proto]];if(n.cluster)attrs.push(['Кластер',n.cluster]);if(n.owner&&n.kind!=='service')attrs.push(['Владелец',n.owner]);if(n.cls)attrs.push(['Классификация',{pdn:'ПДн',kt:'КТ',open:'открытые'}[n.cls]]);
+  if(n.endpoint)attrs.push(['Endpoint',n.endpoint],['Расположение',segOf(n.seg).external?'облако / внешний':'внутренний']);
+  if(n.kind==='platform'){const us=E.filter(e=>e.to===n.id);if(us.length)attrs.push(['Используют',us.map(e=>e.from+(e.bucket?' → '+e.bucket:'')+(e.purpose?' — '+e.purpose:'')).join('\n')]);}
+  if(n.kind==='service'){const path=[];let cur=n.id;for(let i=0;i<5;i++){const e=E.find(x=>x.kind==='expose'&&x.to===cur&&x.svc===n.id);if(!e)break;path.unshift(N[e.from].label);cur=e.from;}
+    if(path.length)attrs.push(['Публикация',path.concat(n.id).join(' → ')]);
+    const au=E.filter(e=>e.from===n.id&&N[e.to].rkind==='adfs');if(au.length)attrs.push(['Аутентификация',au.map(e=>'ADFS — '+e.purpose).join('\n')]);
+    const us=E.filter(e=>e.from===n.id&&e.kind==='use'&&!['kafka','adfs'].includes(N[e.to].rkind));if(us.length)attrs.push(['Ресурсы',us.map(e=>N[e.to].label+(e.bucket?' · '+e.bucket+' ('+e.access+')':'')).join('\n')]);}
+  if(n.server){const sv=DBS[n.server];attrs.push(['Сервер',sv.id+' ('+sv.scope+')'],['СУБД',sv.engine+' '+sv.version]);if(sv.endpoint)attrs.push(['Endpoint',sv.endpoint]);attrs.push(['Хосты',sv.hosts.map(h=>h.fqdn+' ('+h.role+')').join('\n')]);}
+  h+=`<h3>Атрибуты</h3><dl>${attrs.map(([k,v])=>`<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>`;
+  if(n.names){h+=`<h3>Имена по регламенту</h3><dl>${Object.entries(n.names).filter(([k])=>k[0]!=='_').map(([k,v])=>`<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>`;}
+  if(n.kind==='service'||n.owners.length)h+=people(n.owners,n.inherited);
+  if(n.links.length)h+=links(n.links);
+  const f=FIND.filter(x=>x.nodes.includes(n.id)&&x.level!=='attention');
+  if(f.length)h+=`<h3>Нарушения</h3>`+f.map(x=>`<p style="margin:4px 0;font-size:13px"><span class="pill ${x.level==='error'?'p-err':'p-warn'}">${x.level==='error'?'ошибка':'внимание'}</span> ${esc(x.msg)}</p>`).join('');
+  const pv=presentIn(n.id);
+  h+=`<h3>Показать в разрезе</h3><div class="views">${VIEWS.map(([k,l])=>`<button data-v="${k}" ${pv.includes(k)&&k!==S.view?'':'disabled'}>${l}</button>`).join('')}</div>`;
+  el.innerHTML=h;
+  el.querySelectorAll('.views button[data-v]').forEach(b=>b.onclick=()=>{S.view=b.dataset.v;render();});
+  el.querySelectorAll('.copy[data-c]').forEach(b=>b.onclick=()=>copy(b.dataset.c,b));
+}
+function people(list,inh){if(!list.length)return'<h3>Ответственные</h3><p class="empty">Не указаны.</p>';
+  return`<h3>Ответственные${inh?'<span class="inh">из продукта</span>':''}</h3>`+list.map(o=>`<div class="owner"><span class="role">${esc(ROLE[o.role]||o.role)}</span><span>${esc(o.name)}<br><span class="contact">${esc(o.contact||'')}</span></span>${o.contact?`<button class="copy" data-c="${esc(o.contact)}">копировать</button>`:''}</div>`).join('');}
+function links(list){if(!list.length)return'';return`<h3>Ссылки</h3><div class="links">${list.map(l=>`<a href="${esc(l.url)}" target="_blank" rel="noopener"><span class="lk">${LK[l.kind]||l.kind}</span>${esc(l.title||l.url)}</a>`).join('')}</div>`;}
+function copy(text,btn){const done=()=>{const t=btn.textContent;btn.textContent='скопировано';setTimeout(()=>btn.textContent=t,1200);};
+  try{navigator.clipboard.writeText(text).then(done,()=>fallback(text,done));}catch(e){fallback(text,done);}}
+function fallback(text,done){const ta=document.createElement('textarea');ta.value=text;document.body.appendChild(ta);ta.select();try{document.execCommand('copy');done();}catch(e){}ta.remove();}
+let lastRows=[];
+function renderBottom(g){lastRows=g.rows;const b=document.getElementById('bbody');
+  document.getElementById('bt-conn').setAttribute('aria-selected',S.bottom==='conn');document.getElementById('bt-find').setAttribute('aria-selected',S.bottom==='find');
+  const nErr=FIND.filter(f=>f.level!=='attention').length;document.getElementById('bt-find').textContent='Нарушения ('+nErr+')';
+  document.getElementById('copyTsv').hidden=!(S.bottom==='conn'&&S.view==='firewall');
+  if(S.bottom==='conn'){
+    if(S.view!=='firewall'){b.innerHTML='<p class="empty" style="padding:10px">Таблица соединений строится в разрезе «Фаервол».</p>';return;}
+    const sn=id=>segOf(id).name;
+    b.innerHTML=`<table><thead><tr><th>Источник</th><th>Сегмент</th><th>Назначение</th><th>Сегмент</th><th>Хосты назначения</th><th>Порт/протокол</th><th>Отметки</th><th>Основание</th></tr></thead><tbody>${
+      g.rows.map(r=>`<tr><td class="m">${esc(r.from)}</td><td>${esc(sn(r.fs))}</td><td class="m">${esc(r.to)}</td><td>${esc(sn(r.ts))}</td><td class="m hosts">${r.hosts.length?r.hosts.map(esc).join('<br>'):'—'}</td><td class="m">${r.port}/${r.proto}</td><td>${
+        (r.err?'<span class="pill p-err">A-1</span> ':'')+[...r.attn].map(a=>`<span class="pill p-attn">${{sensitive:'ПДн',external:'внешн.','cross-product':'межпрод.',egress:'наружу'}[a]}</span>`).join(' ')+(r.intra?' <span class="pill p-intra">внутри сегм.</span>':'')
+      }</td><td class="r">${esc(r.reasons.join('; '))}</td></tr>`).join('')}</tbody></table>`;
+  } else {
+    const L={error:['ошибка','p-err'],warning:['предупр.','p-warn'],attention:['внимание ИБ','p-attn']};
+    b.innerHTML=FIND.map((f,i)=>`<div class="find" data-i="${i}"><span class="pill ${L[f.level][1]}">${L[f.level][0]}</span><code>${f.rule}</code><span>${esc(f.msg)}</span></div>`).join('');
+    b.querySelectorAll('.find').forEach(d=>d.onclick=()=>{const f=FIND[+d.dataset.i];cy.elements().removeClass('hl');
+      cy.nodes().filter(n=>f.nodes.includes(n.data('model'))&&n.data('kind')!=='frame').addClass('hl');
+      cy.edges().filter(e=>(e.data('me')||[]).some(x=>f.edges.includes(x))).addClass('hl');S.sel=f.nodes[0];renderCard();});
+  }}
+document.getElementById('bt-conn').onclick=()=>{S.bottom='conn';renderBottom(build());};
+document.getElementById('bt-find').onclick=()=>{S.bottom='find';renderBottom(build());};
+document.getElementById('copyTsv').onclick=e=>{const t=['Источник\tСегмент\tНазначение\tСегмент\tХосты\tПорт\tПротокол\tОснование'].concat(lastRows.map(r=>[r.from,r.fs,r.to,r.ts,r.hosts.join(', '),r.port,r.proto,r.reasons.join('; ')].join('\t'))).join('\n');copy(t,e.target);};
+function renderLegend(){const L=document.getElementById('legend');
+  const items=S.view==='dataflows'?[['--pdn','ПДн'],['--kt','КТ'],['--open','открытые']]:[['--err','нарушение'],['--attn','внимание ИБ'],['--accent','выбрано']];
+  L.innerHTML=items.map(([c,t])=>`<span><i style="background:var(${c})"></i>${t}</span>`).join('')+(hasElk?'':'<span>раскладка: cose</span>');}
+render();
+</script>
+</body>
+</html>
