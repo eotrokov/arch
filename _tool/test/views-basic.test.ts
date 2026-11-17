@@ -48,11 +48,6 @@ describe('basic views (demo)', () => {
       expect(g.edges.every((x) => x.from !== x.to)).toBe(true);
       expect(g.edges.find((x) => x.to === 'db:crm_orders' && x.from === 'crm-orders')!.classes).toContain('attention-sensitive');
     });
-    it('merges edges between the same visible pair', () => {
-      const g = containersView(m, findings, { kind: 'product', id: 'pay' });
-      const toCrm = g.edges.filter((x) => x.from === 'product:crm');
-      expect(new Set(toCrm.map((x) => x.id)).size).toBe(toCrm.length);
-    });
     it('external of a product sits in its frame', () => {
       const g = containersView(m, findings, { kind: 'product', id: 'pay' });
       expect(byId(g, 'ext:dwh')).toMatchObject({ parent: 'frame:product:pay', modelId: 'ext:dwh' });
@@ -127,6 +122,57 @@ describe('basic views (demo)', () => {
       expect(buildView(m, findings, crm, 'databases')).toEqual(databasesView(m, findings, crm));
     });
   });
+});
+
+describe('edge aggregation (synthetic)', () => {
+  const m = makeModel({
+    services: ['crm-a', 'crm-b', 'pay-x', 'pay-y'],
+    edges: [
+      { kind: 'call', from: 'crm-a', to: 'pay-x', protocol: 'http' },
+      { kind: 'call', from: 'crm-b', to: 'pay-y', protocol: 'grpc' },
+      { kind: 'call', from: 'crm-b', to: 'pay-x', protocol: 'http' },
+      { kind: 'call', from: 'crm-a', to: 'crm-b', protocol: 'http' },
+      { kind: 'call', from: 'crm-b', to: 'crm-a', protocol: 'http' },
+    ],
+  });
+  it('merges parallel edges between collapsed products', () => {
+    const g = containersView(m, [], { kind: 'company', expanded: [] });
+    const es = g.edges.filter((e) => e.from === 'product:crm' && e.to === 'product:pay');
+    expect(es).toHaveLength(1);
+    expect(es[0]!.modelEdgeIds).toHaveLength(3);
+    expect(es[0]!.label).toBe('http, grpc');
+  });
+  it('drops loops created by collapsing', () => {
+    const g = containersView(m, [], { kind: 'company', expanded: [] });
+    expect(g.edges.some((e) => e.from === e.to)).toBe(false);
+    expect(g.edges).toHaveLength(1);
+  });
+});
+
+describe('referential integrity', () => {
+  const { tree } = loadTree('examples/demo');
+  const m = resolveModel(tree!).model!;
+  const findings = runChecks(tree!, m);
+  const scopes: Scope[] = [
+    { kind: 'company', expanded: [] }, { kind: 'company', expanded: ['crm', 'pay'] },
+    { kind: 'team', id: 'sales' }, { kind: 'product', id: 'crm' }, { kind: 'product', id: 'pay' },
+    ...Object.values(m.nodes).filter((n) => n.kind === 'service').map((n) => ({ kind: 'service' as const, id: n.id })),
+  ];
+  for (const view of ['containers', 'kubernetes', 'databases'] as const) {
+    for (const scope of scopes) {
+      it(`${view} / ${JSON.stringify(scope)}`, () => {
+        const g = buildView(m, findings, scope, view);
+        const ids = g.nodes.map((n) => n.id);
+        expect(new Set(ids).size).toBe(ids.length);
+        const set = new Set(ids);
+        for (const e of g.edges) {
+          expect(set.has(e.from), `edge from ${e.from}`).toBe(true);
+          expect(set.has(e.to), `edge to ${e.to}`).toBe(true);
+        }
+        for (const n of g.nodes) if (n.parent) expect(set.has(n.parent), `parent ${n.parent}`).toBe(true);
+      });
+    }
+  }
 });
 
 describe('empty model', () => {
