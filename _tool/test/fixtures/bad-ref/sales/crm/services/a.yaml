@@ -1,0 +1,13 @@
+name: a1
+segment: app
+cluster: k8s-prod-1
+uses:
+  - { resource: nope }
+  - { resource: smtp-relay, bucket: files, access: rw }
+  - { resource: kafka, entities: [ghost] }
+exposure:
+  - { audience: internet, via: [nope] }
+  - { audience: nope, via: [ingress] }
+databases: [ { server: pg-nope } ]
+calls: [ { target: crm-nope } ]
+consumes: [ { topic: crm.nothing.order.created.v1 } ]

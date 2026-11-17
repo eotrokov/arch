@@ -1,0 +1,13 @@
+segments:
+  - { id: external, name: Внешняя сеть, external: true }
+  - { id: dmz, name: DMZ }
+  - { id: app, name: Сегмент приложений }
+  - { id: db, name: Сегмент БД }
+  - { id: pdn, name: Сегмент ПДн, sensitive: true }
+  - { id: mgmt, name: Управление }
+  - { id: office, name: Офисная сеть }
+actors:
+  - { id: internet, name: Интернет · клиенты, segment: external }
+  - { id: office, name: Сотрудники, segment: office }
+connections:
+  - { from: {segment: mgmt}, to: {segment: app}, port: 9100, protocol: tcp, reason: Мониторинг }
