@@ -46,11 +46,17 @@ const visible = (name: string) => !name.startsWith('_') && !name.startsWith('.')
 const uniqSorted = (xs: string[]) => [...new Set(xs)].sort();
 
 /** Загружает дерево модели из карты файлов (ключ — путь от корня модели через `/`). Без Node. */
-export function loadTreeFromFiles(files: FileMap, root = ''): { tree: RawTree | null; errors: LoadError[] } {
+export function loadTreeFromFiles(
+  files: FileMap,
+  root = '',
+  dirs?: string[],
+  unreadable: Record<string, string> = {},
+): { tree: RawTree | null; errors: LoadError[] } {
   const errors: LoadError[] = [];
   const base = root.replace(/\/+$/, '');
   const full = (p: string) => (base ? `${base}/${p}` : p);
-  const parts = Object.keys(files).map((k) => k.split('/'));
+  const keys = [...new Set([...Object.keys(files), ...Object.keys(unreadable)])];
+  const parts = [...keys.map((k) => k.split('/')), ...(dirs ?? []).map((d) => [...d.split('/'), ''])];
   const childDirs = (prefix: string[]) =>
     uniqSorted(
       parts
@@ -59,6 +65,10 @@ export function loadTreeFromFiles(files: FileMap, root = ''): { tree: RawTree | 
     );
 
   const load = <T>(path: string, validate: ValidateFunction): T | null => {
+    if (path in unreadable) {
+      errors.push({ file: full(path), message: `Не удалось прочитать файл: ${unreadable[path]}` });
+      return null;
+    }
     const text = files[path];
     if (text === undefined) {
       errors.push({ file: full(path), message: 'Файл не найден' });
@@ -81,7 +91,7 @@ export function loadTreeFromFiles(files: FileMap, root = ''): { tree: RawTree | 
 
       const services: RawProduct['services'] = [];
       const svcPrefix = `${teamDir}/${prodDir}/services/`;
-      const names = Object.keys(files)
+      const names = keys
         .filter((k) => k.startsWith(svcPrefix) && !k.slice(svcPrefix.length).includes('/'))
         .map((k) => k.slice(svcPrefix.length))
         .filter((f) => f.endsWith('.yaml') || f.endsWith('.yml'))

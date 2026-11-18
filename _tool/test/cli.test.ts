@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync, cpSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -19,6 +19,27 @@ async function exec(argv: string[]) {
 }
 
 describe('cli', () => {
+  it('team dir without yaml is still an error (exit 2)', async () => {
+    const r = await exec(['validate', '--root', 'test/fixtures/team-no-yaml']);
+    expect(r.code).toBe(2);
+    expect(r.stderr + r.stdout).toMatch(/sales\/team\.yaml: Файл не найден/);
+  });
+
+  it('model.json contains only model files, no strays or outside symlinks', async () => {
+    const root = join(tmp, 'strays');
+    cpSync('examples/demo', root, { recursive: true });
+    writeFileSync(join(root, 'x.yaml'), 'a: 1\n');
+    writeFileSync(join(tmp, 'outside.yaml'), 'secret: 1\n');
+    symlinkSync(join(tmp, 'outside.yaml'), join(root, 'sales/link.yaml'));
+    symlinkSync(join(tmp, 'outside.yaml'), join(root, 'sales/crm/services/evil.yaml'));
+    const out = join(tmp, 'strays-out');
+    await exec(['build', '--root', root, '--out', out]);
+    const keys = Object.keys(JSON.parse(readFileSync(join(out, 'model.json'), 'utf8')).files);
+    expect(keys).not.toContain('x.yaml');
+    expect(keys.some((k) => k.includes('link') || k.includes('evil'))).toBe(false);
+    expect(keys).toContain('sales/team.yaml');
+  });
+
   it('build writes model.json with the file map', async () => {
     const out = join(tmp, 'modeljson');
     expect((await exec(['build', '--root', 'examples/demo', '--out', out])).code).toBe(0);
