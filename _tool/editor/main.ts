@@ -4,11 +4,11 @@ import { loadConfig, type EditorConfig } from './config.js';
 import { GitLabClient, GitLabError } from './gitlab/api.js';
 import { authorizeUrl, createPkce, exchangeCode } from './gitlab/oauth.js';
 import { pickLists, validateFiles, type FileMap, type PickLists, type Validation } from './model.js';
-import { Cart, applyCart, loadDraft, reconcile, saveDraft, type Change } from './cart.js';
+import { Cart, applyCart, isSharedPath, loadDraft, reconcile, saveDraft, type Change } from './cart.js';
 import { deleteChange, startEdit, startNew, toChange, type WizardKind, type WizardState } from './forms.js';
 import { h } from './fields.js';
 import { Wizard } from './wizard.js';
-import type { PlatformNames } from '../src/model/names.js';
+import { platformNames, type PlatformNames } from '../src/model/names.js';
 
 export interface Deps { fetch: typeof fetch; storage: Storage; session: Storage; location: Location }
 
@@ -157,6 +157,12 @@ function readCache(sha: string): CachedModel | null {
   return out;
 }
 
+function errorScreen(msg: string, retry: () => void): HTMLElement {
+  const b = h('button', { type: 'button', class: 'primary', id: 'retry' }, 'Повторить');
+  b.addEventListener('click', retry);
+  return h('section', { class: 'login pane' }, h('p', { class: 'msg err' }, msg), b);
+}
+
 async function loadFromGitLab(): Promise<void> {
   const client = app.client!;
   const cfg = app.cfg!;
@@ -176,7 +182,7 @@ async function loadFromGitLab(): Promise<void> {
     }
   } catch (e) {
     if (e instanceof GitLabError && e.kind === 'auth') return showLogin('Сессия истекла — войдите снова.');
-    setScreen('error', h('p', { class: 'msg err center' }, `Не удалось загрузить модель: ${e instanceof Error ? e.message : String(e)}`));
+    setScreen('error', errorScreen(`Не удалось загрузить модель: ${e instanceof Error ? e.message : String(e)}`, () => void loadFromGitLab()));
     return;
   }
   start();
@@ -197,7 +203,7 @@ async function loadOffline(): Promise<void> {
     }
     Object.assign(app, { files: m.files, blobs: {}, dirs: [...dirs].sort(), builtAt: m.builtAt });
   } catch (e) {
-    setScreen('error', h('p', { class: 'msg err center' }, `Не удалось загрузить model.json: ${e instanceof Error ? e.message : String(e)}`));
+    setScreen('error', errorScreen(`Не удалось загрузить model.json: ${e instanceof Error ? e.message : String(e)}`, () => void loadOffline()));
     return;
   }
   start();
@@ -205,10 +211,19 @@ async function loadOffline(): Promise<void> {
 
 /** Модель загружена: черновик → корзина (сверка с main), первая проверка, экран. */
 function start(): void {
-  const draft = loadDraft(deps.storage, projectKey());
-  const { applied, conflicts } = app.mode === 'gitlab' ? reconcile(draft, app.blobs) : { applied: draft, conflicts: [] };
-  for (const c of applied) app.cart.put(c);
-  app.conflicts = conflicts;
+  // Черновик мог устареть или быть испорчен: плохие записи отбрасываются, старт не прерывается.
+  try {
+    const all = loadDraft(deps.storage, projectKey());
+    const draft = all.filter((c) => !isSharedPath(c.path));
+    if (draft.length < all.length) toast('Из черновика отброшены правки файлов _shared — их меняют архитекторы.', 'warn');
+    const { applied, conflicts } = app.mode === 'gitlab' ? reconcile(draft, app.blobs) : { applied: draft, conflicts: [] };
+    for (const c of applied) app.cart.put(c);
+    app.conflicts = conflicts;
+  } catch (e) {
+    app.cart.clear();
+    app.conflicts = [];
+    toast(`Черновик не восстановлен: ${e instanceof Error ? e.message : String(e)}`, 'warn');
+  }
   revalidate();
   setScreen('ready', h('aside', { class: 'pane tree', id: 'tree', 'aria-label': 'Модель' }), h('section', { class: 'pane wiz', id: 'wizard' }));
   renderAll();
@@ -250,8 +265,7 @@ function revalidate(): void {
   if (!src.tree) src = validateFiles(applyCart(app.files, app.cart.changes()), app.dirs);
   if (!src.tree) src = validateFiles(app.files, app.dirs);
   if (src.tree) {
-    const p = src.tree.platform;
-    lists = { picks: pickLists(src), platform: { env: p.env ?? 'prod', domain: p.domain, registry: p.registry, git: p.git } };
+    lists = { picks: pickLists(src), platform: platformNames(src.tree.platform) };
   }
 }
 
@@ -376,7 +390,9 @@ function renderBanners(): void {
   const out: Node[] = [];
   if (app.openMrs.length) {
     out.push(h('div', { class: 'banner' }, h('strong', {}, 'Ваши открытые MR (ещё не в main): '),
-      ...app.openMrs.flatMap((m, i) => [i ? ', ' : '', h('a', { href: m.webUrl, target: '_blank', rel: 'noopener' }, `!${m.iid} ${m.title}`)])));
+      ...app.openMrs.flatMap((m, i) => [i ? ', ' : '', /^https?:\/\//i.test(m.webUrl)
+        ? h('a', { href: m.webUrl, target: '_blank', rel: 'noopener' }, `!${m.iid} ${m.title}`)
+        : h('span', {}, `!${m.iid} ${m.title}`)])));
   }
   if (app.conflicts.length) {
     const box = h('div', { class: 'banner conflict', id: 'conflicts' },

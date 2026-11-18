@@ -10,6 +10,10 @@ export interface DerivedNames {
 }
 
 export interface PlatformNames { env: string; domain: string; registry: string; git: string }
+/** Имена платформы для deriveNames: env по умолчанию prod, git — хост без схемы и завершающих `/`. */
+export function platformNames(p: { env?: string; domain: string; registry: string; git: string }): PlatformNames {
+  return { env: p.env ?? 'prod', domain: p.domain, registry: p.registry, git: p.git.replace(/^https?:\/\//, '').replace(/\/+$/, '') };
+}
 export type NameOverrides = Record<string, { value: string; reason?: string }>;
 
 export function deriveNames(

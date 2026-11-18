@@ -2,7 +2,7 @@
 import { loadTreeFromFiles, type FileMap } from '../src/model/loadFiles.js';
 import { resolveModel } from '../src/model/resolve.js';
 import { runChecks } from '../src/checks/index.js';
-import { deriveNames, topicName, type ServiceType } from '../src/model/names.js';
+import { deriveNames, platformNames, topicName, type ServiceType } from '../src/model/names.js';
 import type { LoadError, RawTree } from '../src/model/raw.js';
 import type { Finding, Model } from '../src/model/types.js';
 
@@ -62,7 +62,7 @@ export function pickLists(v: Validation): PickLists {
   out.resources = (platform.resources ?? []).map((r) => ({ id: r.id, kind: r.kind, name: r.name }));
   out.externals = (platform.externals ?? []).map((x) => ({ id: x.id, name: x.name }));
 
-  const platformNames = { env: platform.env ?? 'prod', domain: platform.domain, registry: platform.registry, git: platform.git };
+  const platNames = platformNames(platform);
   const topics = new Set<string>();
   for (const team of tree.teams) {
     out.teams.push({ id: team.dir, name: team.data.name });
@@ -75,7 +75,7 @@ export function pickLists(v: Validation): PickLists {
       for (const r of pd.resources ?? []) out.resources.push({ id: r.id, kind: r.kind, name: r.name });
       for (const { data: svc } of product.services) {
         const type = (svc.type === 'backend' || !svc.type ? '' : svc.type) as ServiceType;
-        out.services.push(deriveNames(pd.code, svc.name, type, platformNames).id);
+        out.services.push(deriveNames(pd.code, svc.name, type, platNames).id);
         for (const p of svc.publishes ?? []) topics.add(topicName(pd.code, svc.name, p.entity, p.event, p.version));
       }
     }

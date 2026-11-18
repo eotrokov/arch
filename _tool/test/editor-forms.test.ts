@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readModel } from '../src/model/load.js';
 import { validateFiles } from '../editor/model.js';
+import { platformNames } from '../src/model/names.js';
 import {
   STEPS, READONLY_FIELDS, unknownFields, startNew, startEdit, toChange, deleteChange, stepOfFinding, previewNames,
 } from '../editor/forms.js';
@@ -134,5 +135,18 @@ describe('мастер: ошибки по шагам', () => {
     const errs = [...v.loadErrors];
     expect(errs.length).toBeGreaterThan(0);
     expect(errs.map((x) => stepOfFinding('service', x, svcPath))).toContain('place');
+  });
+});
+
+describe('мастер: выведенные имена совпадают с моделью', () => {
+  it('previewNames с platformNames(platform) даёт те же имена, что разрешённая модель (git со схемой)', () => {
+    const v = validateFiles(demo);
+    expect(v.tree!.platform.git).toMatch(/^https:\/\//);
+    const s = startEdit('service', svcPath, demo[svcPath]!);
+    const n = previewNames(s, platformNames(v.tree!.platform))!;
+    const node = v.model!.nodes['crm-orders']!;
+    expect(n.repoUrl).toBe(node.names!.repoUrl);
+    expect(n.repoUrl).toBe('https://gitlab.company.ru/crm/crm-orders');
+    expect(n).toEqual(node.names);
   });
 });

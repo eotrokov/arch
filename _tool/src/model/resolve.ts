@@ -1,6 +1,6 @@
 // Разрешение дерева YAML в единую модель: узлы + рёбра. Два прохода:
 // (1) регистрация узлов и сущностей с проверкой дублей, (2) рёбра с разрешением ссылок.
-import { bucketName, deriveNames, topicName, type DerivedNames, type ServiceType } from './names.js';
+import { bucketName, deriveNames, platformNames, topicName, type DerivedNames, type ServiceType } from './names.js';
 import type { LoadError, RawEndpointRef, RawProduct, RawService, RawTree } from './raw.js';
 import type { Classification, EdgeKind, Link, Model, ModelEdge, ModelNode, Owner } from './types.js';
 
@@ -28,9 +28,8 @@ export function resolveModel(tree: RawTree): { model: Model | null; errors: Load
   const networkFile = `${sharedDir}/network.yaml`;
 
   const platform = tree.platform;
-  const env = platform.env ?? 'prod';
-  const gitHost = platform.git.replace(/^https?:\/\//, '').replace(/\/+$/, '');
-  const platformNames = { env, domain: platform.domain, registry: platform.registry, git: gitHost };
+  const platNames = platformNames(platform);
+  const env = platNames.env;
 
   const nodes: Record<string, ModelNode> = {};
   const edges: ModelEdge[] = [];
@@ -165,7 +164,7 @@ export function resolveModel(tree: RawTree): { model: Model | null; errors: Load
       const pd = product.data;
       for (const { file, data: svc } of product.services) {
         const type = (svc.type === 'backend' || !svc.type ? '' : svc.type) as ServiceType;
-        const names: DerivedNames = deriveNames(pd.code, svc.name, type, platformNames, svc.overrides as never);
+        const names: DerivedNames = deriveNames(pd.code, svc.name, type, platNames, svc.overrides as never);
         checkSegment(svc.segment, file, `Сервис ${names.id}`);
         if (!clusterIds.has(svc.cluster)) err(file, `Сервис ${names.id}: кластер ${svc.cluster} не найден в platform.yaml`);
         const own = svc.owners && svc.owners.length > 0;
