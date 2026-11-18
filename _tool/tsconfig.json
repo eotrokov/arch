@@ -11,5 +11,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["src", "viewer", "test", "vitest.config.ts", "vitest.e2e.config.ts"]
+  "include": ["src", "scripts", "viewer", "test", "vitest.config.ts", "vitest.e2e.config.ts"]
 }

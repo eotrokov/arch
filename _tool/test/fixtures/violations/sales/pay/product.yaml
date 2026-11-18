@@ -1,0 +1,8 @@
+code: pay
+name: Платежи
+criticality: mission-critical
+owners: [ { role: owner, name: Орлова Е., contact: orlova@company.ru } ]
+entities:
+  - { name: payment, classification: kt, owner: pay-billing }
+externals:
+  - { id: dwh, name: DWH, segment: db, port: 5432, protocol: tcp }

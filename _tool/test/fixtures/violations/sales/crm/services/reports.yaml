@@ -1,0 +1,6 @@
+name: reports
+segment: app
+cluster: k8s-prod-1
+uses:
+  - { db: crm_orders, role: rw }
+owners: [ { role: techlead, name: Кузнецов Д., contact: "@kuznetsov" } ]

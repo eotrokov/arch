@@ -1,0 +1,7 @@
+name: orders
+type: job
+segment: app
+cluster: k8s-prod-1
+uses:
+  - { db: crm_orders, role: migr }
+owners: [ { role: techlead, name: Кузнецов Д., contact: "@kuznetsov" } ]
