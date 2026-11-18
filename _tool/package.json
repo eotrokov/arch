@@ -14,6 +14,7 @@
     "arch:validate": "npm run build && node dist/cli.js validate",
     "spike:build": "node scripts/spike-build.mjs",
     "spike:serve": "node scripts/spike-serve.mjs",
+    "editor:dev": "tsx scripts/editor-dev.ts",
     "arch:build": "npm run build && node dist/cli.js build"
   },
   "dependencies": {
