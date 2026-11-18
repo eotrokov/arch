@@ -104,6 +104,16 @@ export function toChange(s: WizardState, blobId: string | null): Change {
   if (s.isNew) {
     return { path, content: newYaml(s.kind, data), baseBlobId: null, label: `${NEW_LABEL[s.kind]} ${subject(s)}` };
   }
+  const orig = parse(s.originalText ?? '') as Record<string, unknown> | null;
+  const frozen = s.kind === 'service' ? ['name', 'type'] : s.kind === 'product' ? ['code'] : [];
+  for (const k of frozen) {
+    const was = k === 'type' ? typeOf(orig ?? {}) : str(orig?.[k]);
+    const now = k === 'type' ? typeOf(s.data) : str(s.data[k]);
+    if (was !== now) {
+      const what = k === 'name' ? 'Имя существующего сервиса' : k === 'type' ? 'Тип существующего сервиса' : 'Код существующего продукта';
+      throw new Error(`${what} не меняется`);
+    }
+  }
   return {
     path, content: patchYaml(s.originalText ?? '', data), baseBlobId: blobId,
     label: `${EDIT_LABEL[s.kind]} ${subject(s)}`,
@@ -139,9 +149,11 @@ export function stepOfFinding(kind: WizardKind, f: Finding | LoadError, path: st
   const m = f.message;
   const schema = /^Схема: \/([^/:]*)/.exec(m);
   if (schema) return schema[1] ? stepByField(kind, schema[1]) : null;
+  if (/^Дубликат сущности/.test(m)) return 'entities';
   if (/^Дубликат/.test(m)) return 'main';
   if (kind === 'product') {
-    if (/Дубликат сущности|сущность/.test(m)) return 'entities';
+    if (/сущност/.test(m)) return 'entities';
+    if (/^Внешняя система/.test(m)) return 'own';
     return null;
   }
   if (kind !== 'service') return null;

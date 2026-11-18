@@ -31,6 +31,22 @@ describe('мастер: данные', () => {
     expect(c.content).toContain('name: notify');
   });
 
+  it('имя, тип и код существующего не меняются', () => {
+    const text = demo[svcPath]!;
+    const s = startEdit('service', svcPath, text);
+    s.data = { ...s.data, name: 'other' };
+    expect(() => toChange(s, 'b1')).toThrow('Имя существующего сервиса не меняется');
+    const t = startEdit('service', svcPath, text);
+    t.data = { ...t.data, type: 'worker' };
+    expect(() => toChange(t, 'b1')).toThrow('Тип существующего сервиса не меняется');
+    const p = startEdit('product', 'sales/crm/product.yaml', demo['sales/crm/product.yaml']!);
+    p.data = { ...p.data, code: 'zzz' };
+    expect(() => toChange(p, 'b1')).toThrow('Код существующего продукта не меняется');
+    const ok = startEdit('service', svcPath, text);
+    ok.data = { ...ok.data, port: 9999 };
+    expect(toChange(ok, 'b1').content).not.toBe(text);
+  });
+
   it('команда: id не попадает в данные и в unknownFields', () => {
     const s = startNew('team', 'ops');
     s.data = { id: 'ops', name: 'Ops' };
@@ -101,6 +117,15 @@ describe('мастер: ошибки по шагам', () => {
     expect(e('crm-orders: uses.db x — база данных не найдена')).toBe('links');
     expect(e('crm-orders: exposure.audience a — актор не найден в network.yaml')).toBe('publish');
     expect(stepOfFinding('service', { file: 'network.yaml', message: 'Схема: /cluster: x' }, svcPath)).toBeNull();
+  });
+
+  it('ошибки продукта', () => {
+    const pp = 'sales/crm/product.yaml';
+    const e = (message: string) => stepOfFinding('product', { file: pp, message }, pp);
+    expect(e('Дубликат сущности X: a и b')).toBe('entities');
+    expect(e('Дубликат кода продукта crm: a и b')).toBe('main');
+    expect(e('Внешняя система X: сегмент s не найден в network.yaml')).toBe('own');
+    expect(e('Схема: /entities/0/owner: ошибка')).toBe('entities');
   });
 
   it('реальные ошибки загрузки на сломанном сервисе', () => {
