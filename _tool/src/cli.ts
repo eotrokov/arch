@@ -3,7 +3,7 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { loadTree, type LoadError } from './model/load.js';
+import { loadTree, readModelFiles, type LoadError } from './model/load.js';
 import { resolveModel } from './model/resolve.js';
 import { hasErrors, runChecks } from './checks/index.js';
 import { exportMermaid } from './export/mermaid.js';
@@ -69,7 +69,9 @@ export async function run(argv: string[], io: Io): Promise<number> {
       mkdirSync(dirname(file), { recursive: true });
       writeFileSync(file, content);
     };
-    write('index.html', await buildHtml({ model, findings, builtAt: new Date().toISOString() }));
+    const builtAt = new Date().toISOString();
+    write('index.html', await buildHtml({ model, findings, builtAt }));
+    write('model.json', JSON.stringify({ files: readModelFiles(root), builtAt, ...(process.env.CI_COMMIT_SHA ? { commit: process.env.CI_COMMIT_SHA } : {}) }));
     for (const f of exportMermaid(model, findings)) write(f.path, f.content);
     io.stdout(`Собрано: ${join(out, 'index.html')}\n`);
   }

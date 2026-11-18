@@ -1,6 +1,5 @@
 // Разрешение дерева YAML в единую модель: узлы + рёбра. Два прохода:
 // (1) регистрация узлов и сущностей с проверкой дублей, (2) рёбра с разрешением ссылок.
-import { dirname, join } from 'node:path';
 import { bucketName, deriveNames, topicName, type DerivedNames, type ServiceType } from './names.js';
 import type { LoadError, RawEndpointRef, RawProduct, RawService, RawTree } from './raw.js';
 import type { Classification, EdgeKind, Link, Model, ModelEdge, ModelNode, Owner } from './types.js';
@@ -22,9 +21,11 @@ export function resolveModel(tree: RawTree): { model: Model | null; errors: Load
   const err = (file: string, message: string) => errors.push({ file, message });
 
   const firstTeamFile = tree.teams[0]?.file;
-  const sharedDir = firstTeamFile ? join(dirname(dirname(firstTeamFile)), '_shared') : '_shared';
-  const platformFile = join(sharedDir, 'platform.yaml');
-  const networkFile = join(sharedDir, 'network.yaml');
+  // файл команды: <root>/<team>/team.yaml → <root>/_shared (root может быть пустым)
+  const rootDir = firstTeamFile ? firstTeamFile.split('/').slice(0, -2).join('/') : '';
+  const sharedDir = rootDir ? `${rootDir}/_shared` : '_shared';
+  const platformFile = `${sharedDir}/platform.yaml`;
+  const networkFile = `${sharedDir}/network.yaml`;
 
   const platform = tree.platform;
   const env = platform.env ?? 'prod';

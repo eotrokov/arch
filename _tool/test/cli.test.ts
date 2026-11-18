@@ -19,6 +19,14 @@ async function exec(argv: string[]) {
 }
 
 describe('cli', () => {
+  it('build writes model.json with the file map', async () => {
+    const out = join(tmp, 'modeljson');
+    expect((await exec(['build', '--root', 'examples/demo', '--out', out])).code).toBe(0);
+    const j = JSON.parse(readFileSync(join(out, 'model.json'), 'utf8'));
+    expect(j.files['_shared/network.yaml']).toBe(readFileSync('examples/demo/_shared/network.yaml', 'utf8'));
+    expect(typeof j.builtAt).toBe('string');
+  });
+
   it('build demo', async () => {
     const out = join(tmp, 'demo');
     const r = await exec(['build', '--root', 'examples/demo', '--out', out]);
