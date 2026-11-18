@@ -7,12 +7,12 @@ import { Cart, applyCart, isSharedPath, loadDraft, reconcile, saveDraft, type Ch
 import { deleteChange, nameError, startEdit, startNew, toChange, type WizardKind, type WizardState } from './forms.js';
 import { h } from './fields.js';
 import { Wizard } from './wizard.js';
-import { doneView, renderReview, submitting, type ReviewHost, type Status } from './review.js';
+import { doneView, renderReview, resetReviewEdits, submitting, type ReviewHost, type Status } from './review.js';
 import type { Finding } from '../src/model/types.js';
 import type { LoadError } from '../src/model/raw.js';
 import { stepOfFinding } from './forms.js';
 import { platformNames, type PlatformNames } from '../src/model/names.js';
-import type { AppState, Deps, Env } from './state.js';
+import { projectKey as projectKeyOf, type AppState, type Deps, type Env } from './state.js';
 import { btn, byId, setScreen as setScreenIn, toast as toastIn } from './ui.js';
 import { finishLogin, showLogin, showSessionExpired } from './auth.js';
 import { loadFromGitLab as loadFromGitLabIn, loadOffline as loadOfflineIn, refreshOpenMrs, type LoadHooks } from './loading.js';
@@ -39,7 +39,7 @@ let lists: { picks: PickLists; platform: PlatformNames } = { picks: pickLists(EM
 
 
 const $ = (id: string) => byId(doc, id);
-const projectKey = () => app.cfg?.projectPath ?? 'offline';
+const projectKey = () => projectKeyOf(app, deps.location);
 
 // ---- статус, тосты, модальное окно ----
 
@@ -284,7 +284,7 @@ async function reload(notice?: string): Promise<void> {
     if (!built && !doc.defaultView?.confirm('Несохранённые поля мастера будут потеряны. Обновить модель?')) return;
   }
   persist();
-  app.cart.clear();
+  app.cart.clear(); resetReviewEdits();
   app.conflicts = [];
   app.wizard = undefined;
   app.cartPath = undefined;

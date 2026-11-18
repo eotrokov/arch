@@ -4,15 +4,14 @@ import type { FileMap } from './model.js';
 import { h } from './fields.js';
 import { setScreen } from './ui.js';
 import { showLogin } from './auth.js';
-import type { Env } from './state.js';
+import { projectKey, type Env } from './state.js';
 
 /** Что делать после загрузки: показать приложение, обновить баннеры, обработать ошибку запроса MR. */
 export interface LoadHooks { start(): void; banners(): void; error(e: unknown, what: string): void }
 
 type CachedModel = { files: FileMap; blobs: Record<string, string>; dirs: string[] };
 
-const projectKey = (env: Env) => env.app.cfg?.projectPath ?? 'offline';
-const cacheKey = (env: Env, sha: string) => `arch-editor:model:${projectKey(env)}:${sha}`;
+const cacheKey = (env: Env, sha: string) => `arch-editor:model:${projectKey(env.app, env.deps.location)}:${sha}`;
 
 function ss(env: Env, fn: (s: Storage) => void): void {
   try { fn(env.deps.session); } catch { /* хранилище недоступно — без кэша */ }

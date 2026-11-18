@@ -187,6 +187,12 @@ export class GraphView {
     layout.run();
   }
 
+  /** Уничтожить cytoscape (редактор пересоздаёт предпросмотр; просмотрщик не вызывает). */
+  destroy(): void {
+    this.token++; // незавершённая раскладка не должна трогать уничтоженный граф
+    this.cy.destroy();
+  }
+
   select(modelId: string | undefined): void {
     this.cy.elements().unselect();
     if (modelId) this.cy.nodes().filter((n) => n.data('model') === modelId).select();

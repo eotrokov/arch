@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { CHROME, describeChrome } from './chrome.js';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,10 +14,9 @@ import { toHash } from '../../viewer/state.js';
 
 // Бюджет отрисовки на большой модели: охват «Компания» и один продукт — не более 2 с каждый.
 // Модель: ARCH_E2E_ROOT или синтетическая 10/30/300.
-const CHROME = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const BUDGET_MS = 2000;
 
-describe.skipIf(!existsSync(CHROME))('viewer scale budget', () => {
+describeChrome('viewer scale budget', () => {
   let dir: string;
   let browser: Browser;
   let page: Page;

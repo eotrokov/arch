@@ -75,7 +75,7 @@ export function pickLists(v: Validation): PickLists {
       for (const r of pd.resources ?? []) out.resources.push({ id: r.id, kind: r.kind, name: r.name });
       for (const { data: svc } of product.services) {
         const type = (svc.type === 'backend' || !svc.type ? '' : svc.type) as ServiceType;
-        out.services.push(deriveNames(pd.code, svc.name, type, platNames).id);
+        out.services.push(deriveNames(pd.code, svc.name, type, platNames, svc.overrides as never).id);
         for (const p of svc.publishes ?? []) topics.add(topicName(pd.code, svc.name, p.entity, p.event, p.version));
       }
     }

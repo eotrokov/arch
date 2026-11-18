@@ -31,3 +31,7 @@ export interface AppState {
 
 /** Что нужно модулям оболочки: документ, браузерные зависимости и состояние (передаётся явно, не глобально). */
 export interface Env { doc: Document; deps: Deps; app: AppState }
+
+/** Ключ черновика и кэша модели: путь проекта GitLab, в запасном режиме — адрес страницы (два развёртывания на одном домене не делят черновик). */
+export const projectKey = (app: Pick<AppState, 'cfg'>, loc: Pick<Location, 'origin' | 'pathname'>): string =>
+  app.cfg?.projectPath ?? loc.origin + loc.pathname;

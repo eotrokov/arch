@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { CHROME, describeChrome } from './chrome.js';
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,11 +12,10 @@ import { buildHtml } from '../../src/build/html.js';
 import { toHash } from '../../viewer/state.js';
 
 // Враждебные строки из YAML (имена, владельцы, основания) не ломают страницу и не внедряют разметку.
-const CHROME = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const HOSTILE = 'X <!--<script> </script> " \' <img src=x onerror=alert(1)>     end';
 const Y = JSON.stringify(HOSTILE); // YAML double-quoted == JSON string
 
-describe.skipIf(!existsSync(CHROME))('viewer with hostile strings', () => {
+describeChrome('viewer with hostile strings', () => {
   let dir: string;
   let browser: Browser;
   let page: Page;

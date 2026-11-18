@@ -199,6 +199,10 @@ const CONTEXT = 3;
 
 /** Правленые вручную заголовок и описание живут между перерисовками шага (до успешной отправки). */
 let edited: { title?: string; description?: string } = {};
+/** Сброс правок заголовка/описания: после «Обновить» (корзина очищена) и после создания MR. */
+export function resetReviewEdits(): void { edited = {}; }
+/** Граф предпросмотра прошлой отрисовки: при новой его cytoscape уничтожается, иначе утекает. */
+let previewGraph: GraphView | null = null;
 let view: ViewKind = 'containers';
 let scopeIdx = 0;
 
@@ -267,6 +271,8 @@ function checksBlock(sum: ReturnType<typeof reviewSummary>, host: ReviewHost): N
 }
 
 function previewBlock(changes: Change[], v: Validation): Node[] {
+  previewGraph?.destroy();
+  previewGraph = null;
   const title = h('h3', {}, 'Предпросмотр');
   if (!v.model) return [title, h('p', { class: 'empty' }, 'Предпросмотр недоступен: модель с изменениями не собирается — исправьте ошибки выше.')];
   const model = v.model;
@@ -294,7 +300,7 @@ function previewBlock(changes: Change[], v: Validation): Node[] {
       if (tries++ < 10) requestAnimationFrame(draw); // шаг перерисован раньше вставки — не крутимся вечно
       return;
     }
-    graph ??= new GraphView(document, cyEl, { onSelect: () => {}, onExpand: () => {} });
+    graph ??= previewGraph = new GraphView(document, cyEl, { onSelect: () => {}, onExpand: () => {} });
     const key = `${view}|${scope.kind}:${'id' in scope ? scope.id : ''}|${changes.map((c) => c.path).join(',')}`;
     graph.show(key, g, { view, sensitiveSegments }, () => { document.body.dataset.preview = `${view}|${g.nodes.length}`; });
   };
@@ -393,7 +399,7 @@ function mrBlock(changes: Change[], v: Validation, canSubmit: boolean, host: Rev
     host.busy(true);
     try {
       const { webUrl } = await submit(now, title.value, desc.value, randomSuffix, host.storage);
-      edited = {};
+      resetReviewEdits();
       host.busy(false);
       host.done(webUrl);
     } catch (e) {
