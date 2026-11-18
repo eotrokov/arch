@@ -82,7 +82,7 @@ export function resolveModel(tree: RawTree): { model: Model | null; errors: Load
       } else productFiles.set(code, product.file);
       products.push({
         code, name: product.data.name, team: team.dir, criticality: product.data.criticality, nfr: product.data.nfr,
-        owners: product.data.owners ?? [], links: product.data.links ?? [],
+        owners: product.data.owners ?? [], links: product.data.links ?? [], file: product.file,
       });
       for (const en of product.data.entities ?? []) {
         const prev = entityFiles.get(en.name);
@@ -137,7 +137,7 @@ export function resolveModel(tree: RawTree): { model: Model | null; errors: Load
     }
     const node: ModelNode = {
       id: `dbserver:${d.id}`, kind: 'dbserver', label: d.id, segment: d.segment, port: d.port, protocol: 'tcp',
-      engine: d.engine, version: d.version, endpoint: d.endpoint, hosts: d.hosts,
+      engine: d.engine, version: d.version === undefined ? undefined : String(d.version), endpoint: d.endpoint, hosts: d.hosts,
       owners: d.owners ?? [], ownersInherited: false, links: d.links ?? [], file,
     };
     if (register(node)) dbservers.set(d.id, node);
@@ -277,6 +277,11 @@ export function resolveModel(tree: RawTree): { model: Model | null; errors: Load
     });
   }
 
+  // uses.bucket: полное имя бакета, если похоже на «<код продукта>-…-<env>-…», иначе — назначение (Ruling R12)
+  const escRe = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const codes = products.map((p) => escRe(p.code));
+  const fullBucket = codes.length > 0 ? new RegExp(`^(?:${codes.join('|')})-.+-${escRe(env)}-.+$`) : /(?!)/;
+
   for (const ctx of ctxs) {
     const { node, svc, file } = ctx;
     const label = `Сервис ${node.id}`;
@@ -351,7 +356,7 @@ export function resolveModel(tree: RawTree): { model: Model | null; errors: Load
           err(file, `${label}: uses.bucket: ресурс ${u.resource} не kind: s3 (kind: ${res.resourceKind})`);
           continue;
         }
-        e.bucket = bucketName(node.system!, node.serviceName!, env, u.bucket);
+        e.bucket = fullBucket.test(u.bucket) ? u.bucket : bucketName(node.system!, node.serviceName!, env, u.bucket);
         e.access = u.access as 'ro' | 'rw';
       }
       addEdge(e);

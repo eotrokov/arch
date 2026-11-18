@@ -81,6 +81,19 @@ describe('cli', () => {
     expect(r.stdout).toMatch(/^ERROR a1\.foreign-db /m);
   });
 
+  it('product without owner: warning names product.yaml, no stray space', async () => {
+    const r = await exec(['validate', '--root', 'test/fixtures/no-product-owner']);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/^WARN meta\.no-owner \S*sales\/crm\/product\.yaml: У продукта crm /m);
+    expect(r.stdout).not.toMatch(/meta\.no-owner :/);
+  });
+
+  it('README GitLab CI rule requires the model', () => {
+    const readme = readFileSync('README.md', 'utf8');
+    expect(readme).toContain('exists: ["arch/_shared/network.yaml"]');
+    expect(readme).toContain('arch/_shared/platform.yaml');
+  });
+
   it('validate writes nothing', async () => {
     const out = join(tmp, 'val');
     const r = await exec(['validate', '--root', 'examples/demo', '--out', out]);

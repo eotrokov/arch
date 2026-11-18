@@ -1,5 +1,5 @@
 import type { Classification, Finding, Model, ModelEdge, ModelNode } from '../model/types.js';
-import type { ViewEdge, ViewGraph, ViewNode } from './types.js';
+import type { Projection, Scope, ViewEdge, ViewGraph, ViewNode, Visibility } from './types.js';
 
 const CLS_ORDER: Classification[] = ['open', 'kt', 'pdn'];
 
@@ -106,4 +106,56 @@ export function productName(model: Model, code: string | undefined): string {
 
 export function modelNodeClasses(idx: FindingIndex, n: ModelNode): string[] {
   return idx.node(n.id);
+}
+
+/**
+ * Ребро публикации (expose) показывается, только если опубликованный сервис виден и не приглушён (spec §5.2);
+ * в охвате company опубликованный сервис всегда считается видимым.
+ */
+export function exposeShown(e: ModelEdge, proj: Projection, scope: Scope): boolean {
+  if (e.kind !== 'expose') return true;
+  if (scope.kind === 'company') return true;
+  const v = e.exposedService ? proj.visible(e.exposedService) : null;
+  return !!v && !v.muted;
+}
+
+/**
+ * Узел в разрезах с рамками продуктов (контейнеры, потоки): свёрнутый продукт — узел в рамке команды,
+ * иначе узел в рамке продукта; узлы свёрнутого продукта (его внешние системы) — прямо в рамке команды.
+ * Возвращает id узла вида.
+ */
+export function addFramedNode(
+  g: GraphBuilder, model: Model, idx: FindingIndex, scope: Scope, n: ModelNode, v: Visibility,
+): string {
+  const company = scope.kind === 'company';
+  const ensureTeamFrame = (code: string | undefined): string | undefined => {
+    if (!company) return undefined;
+    const t = teamFrame(model, code);
+    if (!t) return undefined;
+    g.addNode({ id: t.id, label: t.label, kind: 'frame', muted: false });
+    return t.id;
+  };
+  if (v.collapsed) {
+    g.addNode({
+      id: v.id, label: productName(model, n.product), kind: 'product', collapsed: true, muted: v.muted,
+      parent: ensureTeamFrame(n.product),
+    });
+    return v.id;
+  }
+  let parent: string | undefined;
+  if (n.product) {
+    const productCollapsed = scope.kind === 'company' && !scope.expanded.includes(n.product);
+    if (productCollapsed) parent = ensureTeamFrame(n.product);
+    else {
+      parent = `frame:product:${n.product}`;
+      g.addNode({
+        id: parent, label: productName(model, n.product), kind: 'frame', muted: v.muted, parent: ensureTeamFrame(n.product),
+      });
+    }
+  }
+  g.addNode({
+    id: n.id, label: n.label, kind: n.kind, parent, muted: v.muted, collapsed: false,
+    classes: modelNodeClasses(idx, n), modelId: n.id,
+  });
+  return n.id;
 }

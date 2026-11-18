@@ -1,7 +1,7 @@
 import type { Finding, Model, ModelEdge, ModelNode } from '../model/types.js';
 import type { FirewallRow, Scope, ViewGraph } from './types.js';
 import { project } from './scope.js';
-import { FindingIndex, GraphBuilder, modelNodeClasses, productName } from './common.js';
+import { exposeShown, FindingIndex, GraphBuilder, modelNodeClasses, productName } from './common.js';
 
 interface Acc { row: FirewallRow; reasons: string[]; attention: Set<string> }
 
@@ -95,6 +95,7 @@ export function firewallView(model: Model, findings: Finding[], scope: Scope): V
       if (ends[0] && ends[1]) addRow(ends[0].id, ends[1].id, ends[1].model, e);
       continue;
     }
+    if (!exposeShown(e, proj, scope)) continue;
     const a = proj.visible(e.from);
     const b = proj.visible(e.to);
     if (!a || !b) continue;

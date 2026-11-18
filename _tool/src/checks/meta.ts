@@ -10,7 +10,7 @@ export function checkMeta(model: Model): Finding[] {
   }
   for (const p of model.products) {
     if (!p.owners.some((o) => o.role === 'owner')) {
-      out.push({ rule: 'meta.no-owner', level: 'warning', nodeIds: [], edgeIds: [],
+      out.push({ rule: 'meta.no-owner', level: 'warning', nodeIds: [`product:${p.code}`], edgeIds: [], file: p.file,
         message: `У продукта ${p.code} нет ответственного с ролью owner.` });
     }
   }

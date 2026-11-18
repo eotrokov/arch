@@ -1,0 +1,17 @@
+name: orders
+segment: app
+cluster: k8s-prod-1
+port: 8080
+protocol: http
+databases: [ { server: pg-crm, classification: pdn } ]
+publishes: [ { entity: order, event: created, version: 1, broker: kafka } ]
+calls: [ { target: pay-billing, protocol: grpc, entities: [order] } ]
+uses:
+  - { resource: kafka }
+  - { resource: s3-main, bucket: files, access: rw, entities: [order], purpose: Вложения к заказам }
+  - { resource: s3-main, bucket: pay-billing-prod-archive, access: ro }
+  - { resource: adfs, purpose: Проверка токенов (JWKS) }
+owners: [ { role: techlead, name: Кузнецов Д., contact: "@kuznetsov" } ]
+links:
+  - { kind: api, url: https://gitlab.company.ru/crm/crm-orders/-/blob/main/api/openapi.yaml }
+  - { kind: dashboard, title: Grafana, url: https://grafana.company.ru/d/crm-orders }

@@ -94,6 +94,7 @@ describe('basic views (demo)', () => {
       expect(srv.label).toContain('postgres 16');
       expect(srv.label).toContain('pg-crm.db.company.ru');
       expect(byId(g, 'host:pg-crm-01.db.company.ru')).toMatchObject({ parent: 'dbserver:pg-crm' });
+      expect(byId(g, 'host:pg-crm-01.db.company.ru')!.label).toBe('pg-crm-01.db.company.ru\nprimary');
       expect(byId(g, 'host:pg-crm-01.db.company.ru')!.classes).toContain('primary');
       expect(byId(g, 'host:pg-crm-02.db.company.ru')!.classes).toContain('replica');
       expect(byId(g, 'db:crm_orders')).toMatchObject({ parent: 'dbserver:pg-crm', modelId: 'db:crm_orders' });

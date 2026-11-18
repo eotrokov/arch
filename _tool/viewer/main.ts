@@ -3,7 +3,7 @@ import type { Finding, Link, Model, Owner } from '../src/model/types.js';
 import { buildView } from '../src/views/index.js';
 import type { FirewallRow, Scope, ViewGraph, ViewKind } from '../src/views/types.js';
 import { cardData, type CardData } from './panels.js';
-import { parseHash, toHash, type UiState } from './state.js';
+import { emptyText, parseHash, toHash, type UiState } from './state.js';
 import { GraphView } from './render.js';
 
 interface ArchData { model: Model; findings: Finding[]; builtAt: string }
@@ -162,8 +162,10 @@ export function boot(doc: Document): void {
   }
 
   // ---- карточка ----
-  function ownersHtml(list: Owner[], inherited: boolean): string {
-    const head = `<h3>Ответственные${inherited ? '<span class="inh">из продукта</span>' : ''}</h3>`;
+  const INHERITED_FROM: Record<string, string> = { product: 'из продукта', dbserver: 'из сервера СУБД' };
+  function ownersHtml(list: Owner[], inherited: boolean, source: CardData['ownersSource']): string {
+    const note = inherited ? INHERITED_FROM[source ?? 'product'] : '';
+    const head = `<h3>Ответственные${note ? `<span class="inh">${note}</span>` : ''}</h3>`;
     if (list.length === 0) return `${head}<p class="empty">Не указаны.</p>`;
     return head + list.map((o) => `<div class="owner"><span class="role">${esc(ROLE[o.role] ?? o.role)}</span><span>${esc(o.name)}<br><span class="contact">${esc(o.contact ?? '')}</span></span>${
       o.contact ? `<button type="button" class="copy" data-c="${esc(o.contact)}">копировать</button>` : ''}</div>`).join('');
@@ -202,7 +204,7 @@ export function boot(doc: Document): void {
     let h = `<h2>${esc(c.title)}</h2><div class="sub">${esc(subtitle(id))}</div>`;
     if (c.attrs.length) h += `<h3>Атрибуты</h3>${dl(c.attrs)}`;
     if (c.names.length) h += `<h3>Имена по регламенту</h3>${dl(c.names)}`;
-    h += ownersHtml(c.owners, c.ownersInherited);
+    h += ownersHtml(c.owners, c.ownersInherited, c.ownersSource);
     h += linksHtml(c.links);
     if (c.findings.length) {
       h += '<h3>Нарушения</h3>' + c.findings.map((f) =>
@@ -307,7 +309,7 @@ export function boot(doc: Document): void {
     renderBottom();
     const empty = $('graphEmpty');
     empty.hidden = current.nodes.length > 0;
-    empty.textContent = `В разрезе «${VIEW_LABEL.get(state.view)}» для этого охвата нет элементов.`;
+    empty.textContent = emptyText(state.view, VIEW_LABEL.get(state.view) ?? state.view, state.scope, model.products.map((p) => p.code));
     const rendered = `${state.view}|${scopeKey(state.scope)}`;
     graph.show(key, current, { view: state.view, sensitiveSegments }, () => {
       if (key !== currentKey) return;

@@ -52,10 +52,34 @@ describe('demo', () => {
     expect(f[0]!.nodeIds).toEqual(['crm-notify-worker']);
   });
   it('no waf finding', () => expect(rules(findings, 'security.no-waf')).toEqual([]));
-  it('foreign bucket for crm-orders using pay-billing bucket', () => {
-    const m: Model = { ...model, edges: model.edges.map((e) =>
-      e.kind === 'use' && e.from === 'crm-orders' && e.bucket ? { ...e, bucket: 'pay-billing-prod-archive' } : e) };
-    expect(rules(checkOwnership(m), 'a1.foreign-bucket')).toHaveLength(1);
+});
+
+describe('fixtures/no-product-owner', () => {
+  it('meta.no-owner for product points at product node and product.yaml', () => {
+    const { tree, errors } = loadTree('test/fixtures/no-product-owner');
+    expect(errors).toEqual([]);
+    const m = resolveModel(tree!).model!;
+    const f = rules(runChecks(tree!, m), 'meta.no-owner');
+    expect(f).toHaveLength(1);
+    expect(f[0]!.nodeIds).toEqual(['product:crm']);
+    expect(f[0]!.file).toBe('test/fixtures/no-product-owner/sales/crm/product.yaml');
+  });
+});
+
+describe('fixtures/foreign-bucket (YAML)', () => {
+  it('full foreign bucket name -> a1.foreign-bucket; own purpose -> no error', () => {
+    const { tree, errors } = loadTree('test/fixtures/foreign-bucket');
+    expect(errors).toEqual([]);
+    const r = resolveModel(tree!);
+    expect(r.errors).toEqual([]);
+    const m = r.model!;
+    const buckets = m.edges.filter((e) => e.from === 'crm-orders' && e.bucket).map((e) => e.bucket);
+    expect(buckets).toEqual(['crm-orders-prod-files', 'pay-billing-prod-archive']);
+    const f = rules(runChecks(tree!, m), 'a1.foreign-bucket');
+    expect(f).toHaveLength(1);
+    expect(f[0]!.level).toBe('error');
+    expect(f[0]!.message).toContain('pay-billing-prod-archive');
+    expect(f[0]!.nodeIds).toEqual(['crm-orders', 'platform:s3-main']);
   });
 });
 

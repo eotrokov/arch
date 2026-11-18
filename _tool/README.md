@@ -85,7 +85,9 @@ arch:
   image: node:22
   script: [cd arch/_tool, npm ci, npm run arch:build]
   artifacts: { when: always, paths: [arch/_dist/] }
-  rules: [ { changes: ["arch/**/*"] } ]
+  rules: [ { changes: ["arch/**/*"], exists: ["arch/_shared/network.yaml"] } ]
 ```
+
+Задаче нужна модель: `arch/_shared/network.yaml` и `arch/_shared/platform.yaml` должны существовать (без них `validate`/`build` завершаются ошибкой). Правило `exists` не запускает задачу, пока `arch/_shared/network.yaml` не добавлен в репозиторий; учтите, что до этого момента задача молча пропускается.
 
 В закрытой сети замените `node:22` на образ из внутреннего registry и укажите внутренний npm-registry (например, `npm config set registry <url>` или `.npmrc`) перед `npm ci`. Сборке нужны `esbuild`, `cytoscape`, `elkjs`, `cytoscape-elk` — они в `dependencies`, поэтому подходит и `npm ci --omit=dev`.

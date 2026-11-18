@@ -18,9 +18,15 @@ function toolRoot(): string {
   }
 }
 
-/** JSON для вставки в <script>: `</` не может закрыть тег. */
+/**
+ * JSON для вставки в <script>: каждый `<` — как \u003c (ни `</script>`, ни `<!--` не сработают),
+ * U+2028/U+2029 — как \u2028/\u2029.
+ */
 export function scriptJson(value: unknown): string {
-  return JSON.stringify(value).replace(/<\//g, '<\\/');
+  return JSON.stringify(value)
+    .replace(/</g, '\\u003c')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
 }
 
 async function bundle(root: string): Promise<string> {

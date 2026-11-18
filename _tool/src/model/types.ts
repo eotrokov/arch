@@ -51,7 +51,7 @@ export interface Model {
   segments: { id: string; name: string; external: boolean; sensitive: boolean }[];
   clusters: { id: string; name: string }[];
   teams: { id: string; name: string; owners: Owner[]; links: Link[]; products: string[] }[];
-  products: { code: string; name: string; team: string; criticality?: string; nfr?: Record<string, unknown>; owners: Owner[]; links: Link[] }[];
+  products: { code: string; name: string; team: string; criticality?: string; nfr?: Record<string, unknown>; owners: Owner[]; links: Link[]; file?: string }[];
   entities: Record<string, { product: string; classification: Classification; owner: string }>;
   nodes: Record<string, ModelNode>;
   edges: ModelEdge[];

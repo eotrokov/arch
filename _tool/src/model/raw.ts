@@ -17,7 +17,7 @@ export interface RawExternal { id: string; name: string; segment: string; port: 
 export interface RawDbHost { fqdn: string; role: 'primary' | 'replica' | 'arbiter' }
 export interface RawDbServer {
   id: string; engine: string; segment: string; port: number; hosts: RawDbHost[];
-  version?: string; endpoint?: string; owners?: RawOwner[]; links?: RawLink[];
+  version?: string | number; endpoint?: string; owners?: RawOwner[]; links?: RawLink[];
 }
 export interface RawCluster { id: string; name: string }
 

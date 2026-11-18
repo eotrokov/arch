@@ -22,7 +22,7 @@ const definitions: Record<string, S> = {
   external: obj({ id: str, name: str, segment: str, port, protocol: str },
     ['id', 'name', 'segment', 'port', 'protocol']),
   dbserver: obj({
-    id: str, engine: str, version: str, endpoint: str, segment: str, port,
+    id: str, engine: str, version: { type: ['string', 'number'], minLength: 1 }, endpoint: str, segment: str, port,
     hosts: {
       type: 'array', minItems: 1,
       items: obj({ fqdn: str, role: { enum: ['primary', 'replica', 'arbiter'] } }, ['fqdn', 'role']),
@@ -127,13 +127,13 @@ export const serviceSchema: S = {
           obj({ resource: str, purpose: str, entities }, ['resource']),
           obj({ resource: str, bucket: str, access: { enum: ['ro', 'rw'] }, purpose: str, entities },
             ['resource', 'bucket', 'access']),
-          obj({ db: str, role: str }, ['db', 'role']),
+          obj({ db: str, role: { enum: ['rw', 'ro', 'migr'] } }, ['db', 'role']),
         ],
       },
     },
     exports: {
       type: 'array',
-      items: obj({ channel: str, target: str, entities }, ['channel', 'target']),
+      items: obj({ channel: { enum: ['cdc', 'batch'] }, target: str, entities }, ['channel', 'target']),
     },
     exposure: {
       type: 'array',

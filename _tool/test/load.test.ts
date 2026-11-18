@@ -3,6 +3,7 @@ import { cpSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadTree } from '../src/model/load.js';
+import { resolveModel } from '../src/model/resolve.js';
 
 const fx = (n: string) => join('test/fixtures', n);
 const tmps: string[] = [];
@@ -96,6 +97,34 @@ describe('loadTree', () => {
     const { tree, errors } = loadTree(withService(base + '  - { resource: x, db: y }\n'));
     expect(tree).toBeNull();
     expect(errors.length).toBeGreaterThan(0);
+  });
+
+  it('uses[].role is rw|ro|migr', () => {
+    const base = 'name: x\nsegment: app\ncluster: k8s-prod-1\nuses:\n';
+    for (const r of ['rw', 'ro', 'migr']) expect(loadTree(withService(`${base}  - { db: crm_x, role: ${r} }\n`)).errors).toEqual([]);
+    const { tree, errors } = loadTree(withService(`${base}  - { db: crm_x, role: admin }\n`));
+    expect(tree).toBeNull();
+    expect(errors.length).toBeGreaterThan(0);
+  });
+
+  it('exports[].channel is cdc|batch', () => {
+    const base = 'name: x\nsegment: app\ncluster: k8s-prod-1\nexports:\n';
+    for (const c of ['cdc', 'batch']) expect(loadTree(withService(`${base}  - { channel: ${c}, target: bank }\n`)).errors).toEqual([]);
+    const { tree, errors } = loadTree(withService(`${base}  - { channel: ftp, target: bank }\n`));
+    expect(tree).toBeNull();
+    expect(errors.length).toBeGreaterThan(0);
+  });
+
+  it('dbserver version: number or string, stringified in the model', () => {
+    const product = (v: string) => `code: crm\nname: CRM\ndbservers:\n  - { id: pg-x, engine: postgres, version: ${v}, segment: db, port: 5432, hosts: [ { fqdn: pg-x-01.db.company.ru, role: primary } ] }\n`;
+    const svcYaml = 'name: x\nsegment: app\ncluster: k8s-prod-1\n';
+    for (const [v, expected] of [['16', '16'], ['"16.2"', '16.2'], ['16.2', '16.2']] as const) {
+      const { tree, errors } = loadTree(withService(svcYaml, product(v)));
+      expect(errors, v).toEqual([]);
+      const r = resolveModel(tree!);
+      expect(r.errors).toEqual([]);
+      expect(r.model!.nodes['dbserver:pg-x']!.version).toBe(expected);
+    }
   });
 
   it('defaults', () => {

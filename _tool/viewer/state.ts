@@ -51,3 +51,12 @@ export function toHash(s: UiState): string {
   if (s.selected !== undefined) parts.push(`sel=${e(s.selected)}`);
   return `#${parts.join('&')}`;
 }
+
+/** Текст пустого состояния схемы. В охвате «Компания» k8s и БД не показывают свёрнутые продукты — подсказываем раскрыть. */
+export function emptyText(view: ViewKind, viewLabel: string, scope: Scope, products: string[]): string {
+  const hasCollapsed = scope.kind === 'company' && products.some((p) => !scope.expanded.includes(p));
+  if (hasCollapsed && (view === 'kubernetes' || view === 'databases')) {
+    return 'Раскройте продукт (двойной клик) или выберите продукт слева';
+  }
+  return `В разрезе «${viewLabel}» для этого охвата нет элементов.`;
+}

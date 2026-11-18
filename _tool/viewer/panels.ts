@@ -9,10 +9,14 @@ export interface CardData {
   names: [string, string][];
   owners: Owner[];
   ownersInherited: boolean;
+  /** Откуда унаследованы ответственные (для подписи в карточке). */
+  ownersSource?: 'product' | 'dbserver';
   links: Link[];
   views: ViewKind[];
   findings: Finding[];
 }
+
+const CLASS_LABEL: Record<string, string> = { pdn: 'ПДн', kt: 'КТ', open: 'открытые' };
 
 const VIEW_ORDER: ViewKind[] = ['kubernetes', 'containers', 'firewall', 'databases', 'dataflows'];
 
@@ -77,19 +81,32 @@ export function cardData(model: Model, findings: Finding[], nodeId: string): Car
         ['Consumer group', d.consumerGroup]);
     }
   } else if (n.kind === 'database') {
+    if (n.ownerService) attrs.push(['Владелец', n.ownerService]);
+    attrs.push(['Классификация', CLASS_LABEL[n.classification ?? 'open'] ?? n.classification ?? '']);
     if (n.server) {
       attrs.push(['Сервер', n.server.replace(/^dbserver:/, '')]);
       const hosts = model.nodes[n.server]?.hosts;
       if (hosts) attrs.push(['Хосты', hosts.map((h) => `${h.fqdn} (${h.role})`).join(', ')]);
     }
+    const schema = n.label;
+    names.push(['Пользователи', `${schema}_rw, ${schema}_ro, ${schema}_migr`]);
+  } else if (n.kind === 'topic') {
+    if (n.ownerService) attrs.push(['Публикует', n.ownerService]);
+    attrs.push(['Классификация', CLASS_LABEL[n.classification ?? 'open'] ?? n.classification ?? '']);
   } else if (n.kind === 'platform') {
     if (n.endpoint) attrs.push(['Endpoint', n.endpoint]);
     attrs.push(['Расположение', seg?.external ? 'облако / внешний' : 'внутренний']);
   }
 
+  // у БД своих ответственных нет — берём ответственных сервера СУБД
+  const server = n.kind === 'database' && n.server ? model.nodes[n.server] : undefined;
+  const owners = server && n.owners.length === 0 ? server.owners : n.owners;
+  const ownersInherited = server && n.owners.length === 0 ? true : n.ownersInherited;
+  const ownersSource: CardData['ownersSource'] = !ownersInherited ? undefined : server ? 'dbserver' : 'product';
+
   const all: Scope = { kind: 'company', expanded: model.products.map((p) => p.code) };
   return {
-    title: n.label, attrs, names, owners: n.owners, ownersInherited: n.ownersInherited, links: n.links,
+    title: n.label, attrs, names, owners, ownersInherited, ownersSource, links: n.links,
     views: viewsWith(model, findings, nodeId, all),
     findings: findings.filter((f) => f.level !== 'attention' && f.nodeIds.includes(nodeId)),
   };

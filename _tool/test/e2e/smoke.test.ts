@@ -25,8 +25,11 @@ const SCOPES: Scope[] = [
 ];
 const scopeKey = (s: Scope) => (s.kind === 'company' ? 'company' : `${s.kind}:${s.id}`);
 
-/** Пусты по построению: в company без раскрытых продуктов сервисы свёрнуты (k8s и БД их не показывают); crm-orders-ui не ходит в БД. */
-const EMPTY = new Set(['kubernetes|company', 'databases|company', 'databases|service:crm-orders-ui']);
+/**
+ * Пусты по построению: в company без раскрытых продуктов сервисы свёрнуты (k8s и БД их не показывают);
+ * crm-orders-ui не ходит в БД и не передаёт сущностей (в потоках — только участники рёбер).
+ */
+const EMPTY = new Set(['kubernetes|company', 'databases|company', 'databases|service:crm-orders-ui', 'dataflows|service:crm-orders-ui']);
 
 describe.skipIf(!hasChrome)(`viewer smoke (headless Chrome: ${CHROME})`, () => {
   let dir: string;
@@ -79,6 +82,11 @@ describe.skipIf(!hasChrome)(`viewer smoke (headless Chrome: ${CHROME})`, () => {
         const count = Number(await page.evaluate(() => document.body.dataset.nodeCount));
         if (EMPTY.has(key)) expect(count).toBe(0);
         else expect(count).toBeGreaterThan(0);
+        const emptyMsg = await page.$eval('#graphEmpty', (el) => ((el as HTMLElement).hidden ? '' : el.textContent ?? ''));
+        if (key === 'kubernetes|company' || key === 'databases|company') {
+          expect(emptyMsg).toBe('Раскройте продукт (двойной клик) или выберите продукт слева');
+        } else if (EMPTY.has(key)) expect(emptyMsg).toContain('нет элементов');
+        else expect(emptyMsg).toBe('');
         expect(errors).toEqual([]);
       });
     }

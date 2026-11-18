@@ -1,0 +1,23 @@
+code: crm
+name: CRM
+criticality: business-critical
+nfr: { slo: "99.9%" }
+owners:
+  - { role: owner, name: Петрова А., contact: petrova@company.ru }
+  - { role: architect, name: Сидоров П., contact: "@sidorov" }
+links:
+  - { kind: docs, url: https://wiki.company.ru/crm/architecture }
+  - { kind: tracker, url: https://jira.company.ru/projects/CRM }
+entities:
+  - { name: order, classification: pdn, owner: crm-orders }
+externals: []
+dbservers:
+  - id: pg-crm
+    engine: postgres
+    version: "16"
+    segment: pdn
+    port: 5432
+    endpoint: pg-crm.db.company.ru
+    hosts:
+      - { fqdn: pg-crm-01.db.company.ru, role: primary }
+      - { fqdn: pg-crm-02.db.company.ru, role: replica }

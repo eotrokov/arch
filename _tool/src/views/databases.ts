@@ -31,7 +31,7 @@ export function databasesView(model: Model, findings: Finding[], scope: Scope): 
         muted, classes: idx.node(server.id).filter((c) => c !== 'violation'), modelId: server.id,
       });
       for (const h of server.hosts ?? []) {
-        g.addNode({ id: `host:${h.fqdn}`, label: h.fqdn, kind: 'host', parent: server.id, muted, classes: [h.role] });
+        g.addNode({ id: `host:${h.fqdn}`, label: `${h.fqdn}\n${h.role}`, kind: 'host', parent: server.id, muted, classes: [h.role] });
       }
     }
     const schema = n.id.replace(/^db:/, '');

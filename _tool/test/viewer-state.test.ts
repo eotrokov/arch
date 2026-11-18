@@ -3,7 +3,7 @@ import { loadTree } from '../src/model/load.js';
 import { resolveModel } from '../src/model/resolve.js';
 import { runChecks } from '../src/checks/index.js';
 import type { Finding, Model } from '../src/model/types.js';
-import { parseHash, toHash, type UiState } from '../viewer/state.js';
+import { emptyText, parseHash, toHash, type UiState } from '../viewer/state.js';
 import { cardData } from '../viewer/panels.js';
 
 describe('hash state', () => {
@@ -59,10 +59,44 @@ describe('cardData (demo)', () => {
     expect(c.links[0]!.kind).toBe('repo');
     expect(c.findings.every((x) => x.level !== 'attention')).toBe(true);
   });
+  it('database card: approver info, users, owners from dbserver', () => {
+    const c = cardData(m, f, 'db:pay_billing');
+    expect(c.attrs).toContainEqual(['Владелец', 'pay-billing']);
+    expect(c.attrs).toContainEqual(['Классификация', 'КТ']);
+    expect(c.names).toContainEqual(['Пользователи', 'pay_billing_rw, pay_billing_ro, pay_billing_migr']);
+    expect(c.owners.map((o) => o.name)).toEqual(['Смирнов В.']);
+    expect(c.ownersInherited).toBe(true);
+    expect(c.ownersSource).toBe('dbserver');
+    expect(cardData(m, f, 'db:crm_orders').attrs).toContainEqual(['Классификация', 'ПДн']);
+  });
+  it('topic card: publisher and classification', () => {
+    const c = cardData(m, f, 'topic:crm.orders.order.created.v1');
+    expect(c.attrs).toContainEqual(['Публикует', 'crm-orders']);
+    expect(c.attrs).toContainEqual(['Классификация', 'ПДн']);
+  });
+  it('inherited service owners come from the product', () => {
+    expect(cardData(m, f, 'crm-notify-worker').ownersSource).toBe('product');
+    expect(cardData(m, f, 'crm-orders').ownersSource).toBeUndefined();
+  });
   it('product card', () => {
     const c = cardData(m, f, 'product:crm');
     expect(c.ownersInherited).toBe(false);
     expect(c.attrs[0]).toEqual(['Код', 'crm']);
     expect(c.views).toContain('containers');
+  });
+});
+
+describe('empty-state text', () => {
+  const HINT = 'Раскройте продукт (двойной клик) или выберите продукт слева';
+  const company = { kind: 'company' as const, expanded: [] };
+  it('kubernetes / databases in company scope with collapsed products: hint', () => {
+    expect(emptyText('kubernetes', 'Kubernetes', company, ['crm', 'pay'])).toBe(HINT);
+    expect(emptyText('databases', 'БД', { kind: 'company', expanded: ['crm'] }, ['crm', 'pay'])).toBe(HINT);
+  });
+  it('otherwise: no elements', () => {
+    expect(emptyText('databases', 'БД', { kind: 'company', expanded: ['crm', 'pay'] }, ['crm', 'pay'])).toBe('В разрезе «БД» для этого охвата нет элементов.');
+    expect(emptyText('databases', 'БД', { kind: 'service', id: 'crm-orders-ui' }, ['crm'])).toContain('нет элементов');
+    expect(emptyText('containers', 'Контейнеры', company, ['crm'])).toContain('нет элементов');
+    expect(emptyText('kubernetes', 'Kubernetes', company, [])).toContain('нет элементов');
   });
 });
