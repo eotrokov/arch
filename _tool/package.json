@@ -16,7 +16,8 @@
     "spike:serve": "node scripts/spike-serve.mjs",
     "editor:build": "tsx scripts/editor-build.ts",
     "editor:serve": "tsx scripts/editor-serve.ts",
-    "arch:build": "npm run build && node dist/cli.js build"
+    "arch:build": "npm run build && node dist/cli.js build",
+    "editor:screens": "tsx scripts/editor-screens.ts"
   },
   "dependencies": {
     "ajv": "^8.20.0",
