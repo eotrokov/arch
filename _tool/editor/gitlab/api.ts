@@ -19,7 +19,8 @@ export class GitLabError extends Error {
 }
 
 const CHANGED_RE = /changed since|has changed|last_commit_id|was changed/i;
-const FILE_GONE_RE = /already exists|doesn'?t exist|does not exist/i;
+/** Только о файле («A file with this name already exists» и т.п.); «A branch called … already exists» сюда не попадает. */
+const FILE_GONE_RE = /\bfile\b[^.]*?\b(already exists|doesn'?t exist|does not exist)/i;
 
 function errorMessage(body: unknown, fallback: string): string {
   if (body && typeof body === 'object') {

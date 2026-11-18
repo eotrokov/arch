@@ -8,7 +8,7 @@ import { Cart, applyCart, isSharedPath, loadDraft, reconcile, saveDraft, type Ch
 import { deleteChange, startEdit, startNew, toChange, type WizardKind, type WizardState } from './forms.js';
 import { h } from './fields.js';
 import { Wizard } from './wizard.js';
-import { doneView, renderReview, type ReviewHost } from './review.js';
+import { doneView, renderReview, submitting, type ReviewHost } from './review.js';
 import type { Finding } from '../src/model/types.js';
 import type { LoadError } from '../src/model/raw.js';
 import { stepOfFinding } from './forms.js';
@@ -359,7 +359,12 @@ function showWizard(st: WizardState, step: string): void {
     stepChanged: (s) => { app.step = s; },
     toCart,
     close: closeWizard,
-    review: (el) => renderReview(el, reviewHost()),
+    review: (el) => {
+      // сводка и кнопка — по проверке текущих полей, а не по отложенной (debounce) проверке
+      clearTimeout(timer);
+      revalidate();
+      renderReview(el, reviewHost());
+    },
   }, step);
   wizard.render();
   renderTree();
@@ -385,6 +390,7 @@ function reviewHost(): ReviewHost {
     done: mrCreated,
     error: handleError,
     reload: () => void reload(),
+    busy: (on) => { ($('reload') as HTMLButtonElement).disabled = on; },
   };
 }
 
@@ -418,6 +424,13 @@ function mrCreated(webUrl: string): void {
 /** «Обновить»: модель заново из main; черновик сверяется с новым main (изменённые там файлы — в баннер конфликтов). */
 async function reload(): Promise<void> {
   if (app.mode !== 'gitlab' || !app.client) return;
+  if (submitting()) return toast('Дождитесь окончания создания MR', 'warn');
+  // несохранённые поля мастера: в корзину (дальше сверка с main как у любой правки), иначе — с подтверждением
+  if (app.wizard) {
+    clearTimeout(timer);
+    const built = currentChange().change ? putCurrent() : null;
+    if (!built && !doc.defaultView?.confirm('Несохранённые поля мастера будут потеряны. Обновить модель?')) return;
+  }
   persist();
   app.cart.clear();
   app.conflicts = [];

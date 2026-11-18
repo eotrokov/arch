@@ -59,6 +59,18 @@ describe('GitLabClient', () => {
     expect(err.kind).toBe('conflict');
   });
 
+  it('createCommit: «файл уже есть / файла нет» — conflict, «ветка уже есть» — other', async () => {
+    const reply = (message: string): typeof fetch => async () =>
+      new Response(JSON.stringify({ message }), { status: 400, headers: { 'content-type': 'application/json' } });
+    const commit = (message: string) => new GitLabClient(cfg, FAKE_TOKEN, reply(message))
+      .createCommit({ branch: 'arch/z-0003', startSha: 'x', message: 'm', actions: [] }).catch((e: GitLabError) => e.kind);
+    expect(await commit('A file with this name already exists')).toBe('conflict');
+    expect(await commit("A file with this name doesn't exist")).toBe('conflict');
+    expect(await commit('A file with this name does not exist')).toBe('conflict');
+    expect(await commit("A branch called 'arch/z-0003' already exists")).toBe('other');
+    expect(await commit('Branch arch/z-0003 does not exist')).toBe('other');
+  });
+
   it('createCommit + createMr: коммит в новую ветку и MR', async () => {
     const c = client();
     const head = await c.branchHead('main');

@@ -95,7 +95,21 @@ async function movedPaths(client: GitLabClient, changes: Change[], ids: Record<s
  * головы baseBranch: если файл с тех пор менялся, GitLab отклонит коммит (kind=conflict), ничего не перезаписав.
  * Успех очищает корзину и черновик (в черновике остаются только нерешённые конфликты). Иначе корзина не трогается.
  */
+/** Идёт отправка: вторая параллельная создала бы вторую ветку, «Обновить» — подменил бы корзину под cart.clear(). */
+let inFlight = false;
+export const submitting = (): boolean => inFlight;
+
 export async function submit(app: AppState, title: string, description: string, rnd: () => string, storage?: Storage): Promise<{ webUrl: string }> {
+  if (inFlight) throw new Error('MR уже создаётся — дождитесь окончания');
+  inFlight = true;
+  try {
+    return await submitOnce(app, title, description, rnd, storage);
+  } finally {
+    inFlight = false;
+  }
+}
+
+async function submitOnce(app: AppState, title: string, description: string, rnd: () => string, storage?: Storage): Promise<{ webUrl: string }> {
   const { client, cfg, baseSha } = app;
   if (app.mode !== 'gitlab' || !client || !cfg || !baseSha) throw new Error('В запасном режиме MR не создаётся — скачайте изменения архивом');
   const changes = app.cart.changes();
@@ -142,7 +156,13 @@ export interface ReviewHost {
   /** Ошибка GitLab в общий обработчик (401 → окно «войти снова»). */
   error(e: unknown, what: string): void;
   reload(): void;
+  /** Отправка началась/закончилась (кнопка «Обновить» в шапке недоступна на это время). */
+  busy(on: boolean): void;
 }
+
+type Status = { kind: 'err' | 'warn' | 'ok'; msg: (Node | string)[] };
+/** Последний отрисованный шаг: результат отправки показывается в нём, даже если шаг перерисовали во время запроса. */
+let current: { root: HTMLElement; host: ReviewHost } | null = null;
 
 const VIEWS: [ViewKind, string][] = [
   ['kubernetes', 'Kubernetes'], ['containers', 'Контейнеры'], ['firewall', 'Фаервол'], ['databases', 'БД'], ['dataflows', 'Потоки данных'],
@@ -173,7 +193,8 @@ export function previewScopes(changes: Change[], model: Model): { scope: Scope; 
   return [...out.values()];
 }
 
-export function renderReview(root: HTMLElement, host: ReviewHost): void {
+export function renderReview(root: HTMLElement, host: ReviewHost, status?: Status): void {
+  current = { root, host };
   const app = host.app();
   const changes = host.changes();
   const v = app.validation;
@@ -182,7 +203,7 @@ export function renderReview(root: HTMLElement, host: ReviewHost): void {
     ...checksBlock(sum, host),
     ...previewBlock(changes, v),
     ...diffBlock(changes, app.files),
-    ...mrBlock(changes, v, sum.canSubmit, host),
+    ...mrBlock(changes, v, sum.canSubmit, host, status),
   );
 }
 
@@ -295,7 +316,7 @@ function diffBlock(changes: Change[], files: Record<string, string>): Node[] {
   return out;
 }
 
-function mrBlock(changes: Change[], v: Validation, canSubmit: boolean, host: ReviewHost): Node[] {
+function mrBlock(changes: Change[], v: Validation, canSubmit: boolean, host: ReviewHost, initial?: Status): Node[] {
   const app = host.app();
   const offline = app.mode !== 'gitlab';
   const title = h('input', { class: 'in', id: 'mrTitle', 'aria-label': 'Заголовок' });
@@ -305,24 +326,40 @@ function mrBlock(changes: Change[], v: Validation, canSubmit: boolean, host: Rev
   desc.value = edited.description ?? mrDescription(changes, v.findings);
   desc.addEventListener('input', () => { edited.description = desc.value; });
   const status = h('div', { class: 'mr-status', id: 'mrStatus', 'aria-live': 'polite' });
-  const say = (kind: 'err' | 'warn' | 'ok', ...msg: (Node | string)[]) => status.replaceChildren(h('p', { class: `msg ${kind}` }, ...msg));
-  const btn = h('button', { type: 'button', class: 'primary', id: offline ? 'download' : 'createMr', disabled: !canSubmit },
+  const show = (st: Status) => status.replaceChildren(h('p', { class: `msg ${st.kind}` }, ...st.msg));
+  const btn = h('button', { type: 'button', class: 'primary', id: offline ? 'download' : 'createMr', disabled: !canSubmit || submitting() },
     offline ? 'Скачать изменения' : 'Создать MR');
+  /** Сообщение в шаге; если шаг перерисован (кнопка вне документа) — перерисовать актуальный шаг с этим сообщением. */
+  const say = (kind: Status['kind'], ...msg: (Node | string)[]) => {
+    if (btn.isConnected || !current?.root.isConnected) return show({ kind, msg });
+    renderReview(current.root, current.host, { kind, msg });
+  };
+  if (submitting()) show({ kind: 'warn', msg: ['Создание MR…'] });
+  else if (initial) show(initial);
   const why = !changes.length ? 'Корзина пуста.' : !canSubmit ? 'Исправьте ошибки выше, чтобы создать MR.' : '';
 
   btn.addEventListener('click', () => void (async () => {
     if (!title.value.trim()) return say('err', 'Укажите заголовок MR.');
     if (!host.flush()) return say('err', 'Текущую правку мастера нельзя положить в корзину — исправьте её или закройте мастер.');
     const now = host.app();
-    if (!reviewSummary(now.validation, now.cart.changes()).canSubmit) return say('err', 'После добавления правки в корзину появились ошибки — проверьте сводку.');
+    if (!reviewSummary(now.validation, now.cart.changes()).canSubmit) {
+      // сводку перерисовать по проверке после добавления правки, иначе сообщение указывало бы на устаревшую
+      const root = current?.root;
+      if (root?.isConnected) return renderReview(root, host, { kind: 'err', msg: ['MR не создан: в модели с этой правкой есть ошибки — см. сводку выше.'] });
+      return say('err', 'MR не создан: в модели с этой правкой есть ошибки — см. сводку выше.');
+    }
+    if (submitting()) return say('warn', 'MR уже создаётся — дождитесь окончания.');
     if (offline) return download(now.cart.changes(), title.value.trim(), desc.value, say);
     btn.disabled = true;
     say('warn', 'Создание MR…');
+    host.busy(true);
     try {
       const { webUrl } = await submit(now, title.value, desc.value, rand4, host.storage);
       edited = {};
+      host.busy(false);
       host.done(webUrl);
     } catch (e) {
+      host.busy(false);
       btn.disabled = false;
       const auth = (x: unknown) => x instanceof GitLabError && x.kind === 'auth';
       if (auth(e)) {

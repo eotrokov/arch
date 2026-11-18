@@ -7,7 +7,7 @@ import { Cart, loadDraft, saveDraft, type Change } from '../editor/cart.js';
 import type { Validation } from '../editor/model.js';
 import type { AppState } from '../editor/main.js';
 import type { Finding } from '../src/model/types.js';
-import { lineDiff, reviewSummary, submit } from '../editor/review.js';
+import { lineDiff, reviewSummary, submit, submitting } from '../editor/review.js';
 import { FAKE_TOKEN, startFakeGitLab, type FakeGitLab } from './fake-gitlab.js';
 
 class MemStorage implements Storage {
@@ -203,6 +203,26 @@ describe('submit с фейковым GitLab', () => {
 
     expect((err as GitLabError).kind).toBe('auth');
     expect(app.cart.isEmpty()).toBe(false);
+  });
+
+  it('вторая отправка во время первой отклоняется: одна ветка, один MR', async () => {
+    const app = await loadApp();
+    put(app, { path: ORDERS, content: demo[ORDERS] + '# правка\n', label: 'Изменение сервиса crm-orders' });
+    expect(submitting()).toBe(false);
+    const first = submit(app, 'Правка', 'd', rnd, storage);
+    expect(submitting()).toBe(true);
+    await expect(submit(app, 'Правка', 'd', rnd, storage)).rejects.toThrow(/уже создаётся/);
+    expect((await first).webUrl).toContain('/merge_requests/1');
+    expect(submitting()).toBe(false);
+    expect(posts('/repository/commits')).toHaveLength(1);
+    expect(posts('/merge_requests')).toHaveLength(1);
+  });
+
+  it('после ошибки отправки флаг снят', async () => {
+    const app = await loadApp(fetch, 'expired');
+    put(app, { path: ORDERS, content: 'x: 1\n', label: 'l' });
+    await expect(submit(app, 't', 'd', rnd, storage)).rejects.toBeInstanceOf(GitLabError);
+    expect(submitting()).toBe(false);
   });
 
   it('пустая корзина или запасной режим — ошибка без запросов', async () => {
