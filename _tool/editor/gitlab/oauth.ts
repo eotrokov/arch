@@ -1,5 +1,6 @@
 // OAuth Authorization Code + PKCE (S256). Токен здесь не хранится.
 import type { EditorConfig } from '../config.js';
+import { GitLabError, httpError, networkError } from './api.js';
 
 function base64url(bytes: Uint8Array): string {
   let s = '';
@@ -42,14 +43,18 @@ export async function exchangeCode(cfg: EditorConfig, code: string, verifier: st
     client_id: cfg.oauthClientId,
     code_verifier: verifier,
   });
-  const res = await fetchFn(`${cfg.gitlabUrl}/oauth/token`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: body.toString(),
-  });
-  const data = (await res.json().catch(() => ({}))) as { access_token?: string; error_description?: string; error?: string };
-  if (!res.ok || !data.access_token) {
-    throw new Error(data.error_description ?? data.error ?? `обмен кода не удался (HTTP ${res.status})`);
+  let res: Response;
+  try {
+    res = await fetchFn(`${cfg.gitlabUrl}/oauth/token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+    });
+  } catch (e) {
+    throw e instanceof TypeError ? networkError() : e;
   }
+  if (!res.ok) throw await httpError(res);
+  const data = (await res.json().catch(() => ({}))) as { access_token?: string };
+  if (!data.access_token) throw new GitLabError(res.status, 'other', 'в ответе нет access_token');
   return data.access_token;
 }

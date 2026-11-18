@@ -29,6 +29,24 @@ function errorMessage(body: unknown, fallback: string): string {
   return fallback;
 }
 
+export function networkError(): GitLabError {
+  return new GitLabError(0, 'cors-or-network', 'нет ответа от GitLab: сеть недоступна или GitLab не разрешает CORS с этого адреса');
+}
+
+/** Разбор ответа с ошибкой: общий для клиента API и обмена кода OAuth. */
+export async function httpError(res: Response): Promise<GitLabError> {
+  const body: unknown = await res.json().catch(() => null);
+  const msg = errorMessage(body, `HTTP ${res.status}`);
+  const code = body && typeof body === 'object' ? (body as { error?: unknown }).error : undefined;
+  const oauthReject = (res.status === 400 || res.status === 401) && (code === 'invalid_client' || code === 'invalid_grant');
+  const kind: GitLabErrorKind =
+    res.status === 401 || oauthReject ? 'auth'
+    : res.status === 403 ? 'forbidden'
+    : (res.status === 400 || res.status === 409) && CHANGED_RE.test(msg) ? 'conflict'
+    : 'other';
+  return new GitLabError(res.status, kind, msg);
+}
+
 export class GitLabClient {
   private readonly base: string;
   constructor(private cfg: EditorConfig, private token: string, private fetchFn: typeof fetch) {
@@ -41,20 +59,11 @@ export class GitLabClient {
     try {
       res = await f(url, { ...init, headers: { ...(init.headers as Record<string, string>), authorization: `Bearer ${this.token}` } });
     } catch (e) {
-      if (e instanceof TypeError) {
-        throw new GitLabError(0, 'cors-or-network', 'нет ответа от GitLab: сеть недоступна или GitLab не разрешает CORS с этого адреса');
-      }
+      if (e instanceof TypeError) throw networkError();
       throw e;
     }
     if (res.ok) return res;
-    const body: unknown = await res.json().catch(() => null);
-    const msg = errorMessage(body, `HTTP ${res.status}`);
-    const kind: GitLabErrorKind =
-      res.status === 401 ? 'auth'
-      : res.status === 403 ? 'forbidden'
-      : (res.status === 400 || res.status === 409) && CHANGED_RE.test(msg) ? 'conflict'
-      : 'other';
-    throw new GitLabError(res.status, kind, msg);
+    throw await httpError(res);
   }
 
   private async json<T>(url: string, init?: RequestInit): Promise<T> {

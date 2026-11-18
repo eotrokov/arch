@@ -28,7 +28,7 @@ export async function startFakeGitLab(opts: { files: Record<string, string>; por
   for (const [p, c] of Object.entries(opts.files)) mainFiles.set(p, { content: c, commit: initial });
   const branches = new Map<string, Branch>([['main', { head: initial, files: mainFiles }]]);
   const mrs: Mr[] = [];
-  const codes = new Map<string, string>(); // code -> code_challenge
+  const codes = new Map<string, { challenge: string; clientId: string; redirectUri: string }>();
   const requests: FakeRequest[] = [];
   let baseUrl = '';
 
@@ -68,7 +68,11 @@ export async function startFakeGitLab(opts: { files: Record<string, string>; por
 
       if (path === '/oauth/authorize') {
         const code = 'c1';
-        codes.set(code, url.searchParams.get('code_challenge') ?? '');
+        codes.set(code, {
+          challenge: url.searchParams.get('code_challenge') ?? '',
+          clientId: url.searchParams.get('client_id') ?? '',
+          redirectUri: url.searchParams.get('redirect_uri') ?? '',
+        });
         const back = new URL(url.searchParams.get('redirect_uri') ?? '');
         back.searchParams.set('code', code);
         back.searchParams.set('state', url.searchParams.get('state') ?? '');
@@ -77,8 +81,11 @@ export async function startFakeGitLab(opts: { files: Record<string, string>; por
       if (path === '/oauth/token' && method === 'POST') {
         const b = (body ?? {}) as Record<string, string>;
         const expected = codes.get(b.code ?? '');
+        if (expected && (b.client_id !== expected.clientId || b.redirect_uri !== expected.redirectUri)) {
+          return send(res, 401, { error: 'invalid_client', error_description: 'Client authentication failed: неверный client_id или redirect_uri' });
+        }
         const ok = b.grant_type === 'authorization_code' && expected !== undefined
-          && b64url(createHash('sha256').update(b.code_verifier ?? '').digest()) === expected;
+          && b64url(createHash('sha256').update(b.code_verifier ?? '').digest()) === expected.challenge;
         if (!ok) return send(res, 400, { error: 'invalid_grant', error_description: 'PKCE: code_verifier не соответствует code_challenge' });
         return send(res, 200, { access_token: FAKE_TOKEN, token_type: 'Bearer', scope: 'api' });
       }

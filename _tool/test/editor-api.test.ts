@@ -80,7 +80,22 @@ describe('exchangeCode + фейк', () => {
     const loc = new URL(res.headers.get('location')!);
     expect(loc.searchParams.get('state')).toBe('st');
     const code = loc.searchParams.get('code')!;
-    await expect(exchangeCode(cfg, code, 'x'.repeat(64), fetch)).rejects.toThrow();
+    await expect(exchangeCode(cfg, code, 'x'.repeat(64), fetch)).rejects.toMatchObject({ kind: 'auth' });
     expect(await exchangeCode(cfg, code, verifier, fetch)).toBe(FAKE_TOKEN);
+  });
+
+  it('неверный client_id даёт GitLabError kind=auth', async () => {
+    const { verifier, challenge } = await createPkce();
+    const res = await fetch(authorizeUrl(cfg, challenge, 's'), { redirect: 'manual' });
+    const code = new URL(res.headers.get('location')!).searchParams.get('code')!;
+    const err = await exchangeCode({ ...cfg, oauthClientId: 'wrong' }, code, verifier, fetch).catch((e) => e);
+    expect(err).toBeInstanceOf(GitLabError);
+    expect(err.kind).toBe('auth');
+  });
+
+  it('недоступный хост даёт GitLabError kind=cors-or-network', async () => {
+    const err = await exchangeCode({ ...cfg, gitlabUrl: 'http://127.0.0.1:1' }, 'c', 'v', fetch).catch((e) => e);
+    expect(err).toBeInstanceOf(GitLabError);
+    expect(err.kind).toBe('cors-or-network');
   });
 });
