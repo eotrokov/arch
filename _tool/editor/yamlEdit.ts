@@ -108,15 +108,34 @@ class Src {
     return nl < 0 ? this.text.length : nl + 1;
   }
   col(x: number): number { return x - this.lineStart(x); }
-  /** Начало строк-комментариев с отступом `col` непосредственно над строкой, начинающейся в `ls`. */
+  /**
+   * Начало собственных комментариев ключа/элемента, строка которого начинается в `ls`: подряд идущие
+   * строки-комментарии с отступом `col` прямо над ней. Блок, начинающий файл (шапка) или стоящий
+   * после пустой строки (заголовок раздела), — не собственный: тогда `ls`.
+   */
   commentsAbove(ls: number, col: number): number {
-    while (ls > 0) {
-      const prev = this.lineStart(ls - 1);
-      const line = this.text.slice(prev, ls - 1);
-      if (line.trimStart().startsWith('#') && line.length - line.trimStart().length === col) ls = prev;
+    let top = ls;
+    while (top > 0) {
+      const prev = this.lineStart(top - 1);
+      const line = this.text.slice(prev, top - 1);
+      if (line.trimStart().startsWith('#') && line.length - line.trimStart().length === col) top = prev;
       else break;
     }
-    return ls;
+    if (top === ls) return ls;
+    if (top === 0 || !this.text.slice(this.lineStart(top - 1), top - 1).trim()) return ls;
+    return top;
+  }
+  /** Комментарий в строке ключа после значения (или после `:`, если значение на следующих строках). */
+  keyLineComment(p: Pair): string {
+    const k = rng(p.key)!;
+    const le = this.lineEnd(k[1]);
+    const r = rng(p.value);
+    let from = k[1];
+    if (r && r[0] < le) {
+      if (r[1] > le) return '';
+      from = r[1];
+    }
+    return /(?:^|\s)(#.*)$/.exec(this.text.slice(from, le).replace(/\n$/, ''))?.[1] ?? '';
   }
   /** Перед позицией `x` в её строке только пробелы (и `- `, если `dash`). */
   lineLead(x: number, dash = false): boolean {
@@ -180,8 +199,10 @@ function replacePair(s: Src, p: Pair, want: unknown): Splice {
   const v = p.value;
   const ind = ' '.repeat(s.col(k[0]));
   const seqIndent = isSeq(v) && !v.flow ? s.col(rng(v)![0]) > s.col(k[0]) : s.seqIndent;
-  const text = pair(s.text.slice(k[0], k[1]), want, ind, seqIndent, isMap(v));
-  return { start: k[0], end: pairEnd(s, p), text: text.slice(ind.length) };
+  let text = pair(s.text.slice(k[0], k[1]), want, ind, seqIndent, isMap(v)).slice(ind.length);
+  const comment = s.keyLineComment(p);
+  if (comment) text = text.replace('\n', ` ${comment}\n`);
+  return { start: k[0], end: pairEnd(s, p), text };
 }
 
 function patchMap(s: Src, map: YAMLMap, cur: Obj, want: Obj): Edits {
@@ -270,6 +291,19 @@ function detectSeqIndent(text: string, map: YAMLMap): boolean {
 
 /** `kind` задаёт порядок ключей для новых ключей; без него — по наличию `code` (продукт) или сервис. */
 export function patchYaml(original: string, next: object, kind?: YamlKind): string {
+  return patchYamlDetailed(original, next, kind).text;
+}
+
+export interface PatchResult {
+  text: string;
+  /** Результат получен точечной правкой (без отката на замену изменённых значений целиком). */
+  fine: boolean;
+  /** Почему точечная правка не прошла (тогда сработал откат). */
+  fineError?: string;
+}
+
+/** То же, что `patchYaml`, с признаком пути правки (для тестов и диагностики). */
+export function patchYamlDetailed(original: string, next: object, kind?: YamlKind): PatchResult {
   // Файл целиком в CRLF правится как LF и возвращается в CRLF.
   const crlf = original.includes('\r\n') && !/(^|[^\r])\n/.test(original);
   const text = crlf ? original.replace(/\r\n/g, '\n') : original;
@@ -281,19 +315,21 @@ export function patchYaml(original: string, next: object, kind?: YamlKind): stri
   const cur: Obj = isObj(doc.toJS()) ? doc.toJS() : {};
   const k: YamlKind = kind ?? ('code' in target || 'code' in cur ? 'product' : 'service');
   const eol = (x: string) => (crlf ? x.replace(/\n/g, '\r\n') : x);
-  if (!isMap(map)) return eol(newYaml(k, target));
+  if (!isMap(map)) return { text: eol(newYaml(k, target)), fine: true };
 
   const seqIndent = detectSeqIndent(src, map);
   let out: string | undefined;
+  let fineError: string | undefined;
   try {
     out = splice(new Src(src, true, seqIndent), map, cur, target, k);
     if (out !== undefined) checkResult(out, cur, target);
-  } catch {
+  } catch (e) {
     // Точечная правка не прошла проверку — замена изменённых значений целиком.
+    fineError = e instanceof Error ? e.message : String(e);
     out = splice(new Src(src, false, seqIndent), map, cur, target, k);
     if (out !== undefined) checkResult(out, cur, target);
   }
-  return out === undefined ? original : eol(out);
+  return { text: out === undefined ? original : eol(out), fine: fineError === undefined, fineError };
 }
 
 /** Правки верхнего уровня (порядок новых ключей — канонический) и их применение; undefined — изменений нет. */
@@ -327,11 +363,14 @@ function splice(s: Src, map: YAMLMap, cur: Obj, target: Obj, k: YamlKind): strin
   for (const [pos, text] of inserts) splices.push({ start: pos, end: pos, text });
 
   if (!splices.length) return undefined;
-  // С конца к началу; при равном начале сначала замена, затем вставка перед ней.
-  splices.sort((a, b) => b.start - a.start || (b.end - b.start) - (a.end - a.start));
+  // С конца к началу; при равном начале сначала замена, затем вставка перед ней. Вставки в одной
+  // позиции — в порядке добавления (вложенные раньше внешних): позже добавленная применяется первой,
+  // а каждая следующая встаёт перед ней.
+  const queue = splices.map((sp, i) => ({ sp, i }));
+  queue.sort((a, b) => b.sp.start - a.sp.start || (b.sp.end - b.sp.start) - (a.sp.end - a.sp.start) || b.i - a.i);
   let out = s.text;
   let limit = Infinity;
-  for (const sp of splices) {
+  for (const { sp } of queue) {
     // Пересекающиеся удаления (комментарий над ключом в хвосте предыдущего значения) сливаются.
     if (sp.end > limit) {
       if (sp.text) throw new Error('Правка YAML: пересекающиеся правки');
