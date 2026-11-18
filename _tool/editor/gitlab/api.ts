@@ -1,5 +1,6 @@
 // Клиент GitLab REST API v4. fetch внедряется (тесты и браузер).
 import type { EditorConfig } from '../config.js';
+import type { FileMap } from '../../src/model/loadFiles.js';
 
 export type CommitAction = {
   action: 'create' | 'update' | 'delete';
@@ -122,4 +123,53 @@ export class GitLabClient {
     });
     return { iid: mr.iid, webUrl: mr.web_url };
   }
+
+  /** Последний коммит, менявший файл на ref (для last_commit_id). */
+  async lastCommitId(path: string, ref: string): Promise<string> {
+    const res = await this.request(`${this.base}/repository/files/${encodeURIComponent(path)}?ref=${encodeURIComponent(ref)}`, { method: 'HEAD' });
+    const id = res.headers.get('x-gitlab-last-commit-id');
+    if (!id) throw new GitLabError(res.status, 'other', 'GitLab не вернул X-Gitlab-Last-Commit-Id');
+    return id;
+  }
+
+  /** Открытые MR пользователя с меткой arch-editor. */
+  async openMrs(username: string): Promise<{ iid: number; title: string; webUrl: string }[]> {
+    const q = `labels=arch-editor&state=opened&author_username=${encodeURIComponent(username)}&per_page=100`;
+    const list = await this.json<{ iid: number; title: string; web_url: string }[]>(`${this.base}/merge_requests?${q}`);
+    return list.map((m) => ({ iid: m.iid, title: m.title, webUrl: m.web_url }));
+  }
+
+  /**
+   * Загружает файлы модели (как CLI: _shared, team.yaml, product.yaml, services/*.yaml|yml) на зафиксированной голове ветки.
+   * dirs — каталоги команд и команда/продукт (без `_`/`.`), чтобы пустые каталоги давали «Файл не найден».
+   */
+  async loadModel(ref: string, concurrency = 8): Promise<{ files: FileMap; blobs: Record<string, string>; baseSha: string; dirs: string[] }> {
+    const baseSha = await this.branchHead(ref);
+    const tree = await this.tree(baseSha);
+    const wanted = tree.filter((e) => e.type === 'blob' && MODEL_FILE_RE.test(e.path));
+    const files: FileMap = {};
+    const blobs: Record<string, string> = {};
+    let next = 0;
+    const worker = async () => {
+      for (let e = wanted[next++]; e; e = wanted[next++]) {
+        files[e.path] = await this.rawFile(e.path, baseSha);
+        blobs[e.path] = e.id;
+      }
+    };
+    await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, wanted.length)) }, worker));
+    const visible = (n: string) => !n.startsWith('_') && !n.startsWith('.');
+    const treeDirs = new Set(tree.filter((e) => e.type === 'tree').map((e) => e.path));
+    const dirs: string[] = [];
+    for (const team of [...treeDirs].filter((d) => !d.includes('/') && visible(d)).sort()) {
+      dirs.push(team);
+      const prefix = `${team}/`;
+      for (const d of [...treeDirs].filter((d) => d.startsWith(prefix) && !d.slice(prefix.length).includes('/')).sort()) {
+        if (visible(d.slice(prefix.length))) dirs.push(d);
+      }
+    }
+    return { files: sortKeys(files), blobs: sortKeys(blobs), baseSha, dirs };
+  }
 }
+
+const MODEL_FILE_RE = /^(_shared\/[^/]+\.ya?ml|[^/_.][^/]*\/team\.yaml|[^/_.][^/]*\/[^/_.][^/]*\/product\.yaml|[^/_.][^/]*\/[^/_.][^/]*\/services\/[^/]+\.ya?ml)$/;
+const sortKeys = <T>(o: Record<string, T>): Record<string, T> => Object.fromEntries(Object.entries(o).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));

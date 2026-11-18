@@ -23,6 +23,7 @@
     "cytoscape-elk": "2.2.0",
     "elkjs": "0.9.3",
     "esbuild": "^0.28.2",
+    "fflate": "0.8.2",
     "yaml": "^2.9.1"
   },
   "devDependencies": {

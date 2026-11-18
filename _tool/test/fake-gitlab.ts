@@ -32,8 +32,14 @@ export async function startFakeGitLab(opts: { files: Record<string, string>; por
   const requests: FakeRequest[] = [];
   let baseUrl = '';
 
-  const resolveRef = (ref: string): Branch | undefined =>
-    branches.get(ref) ?? [...branches.values()].find((b) => b.head === ref);
+  // Снимки файлов по каждому коммиту: start_sha/ref могут указывать на уже устаревшую голову ветки.
+  const history = new Map<string, Map<string, FileEntry>>([[initial, new Map(mainFiles)]]);
+  const resolveRef = (ref: string): Branch | undefined => {
+    const b = branches.get(ref) ?? [...branches.values()].find((x) => x.head === ref);
+    if (b) return b;
+    const files = history.get(ref);
+    return files ? { head: ref, files } : undefined;
+  };
 
   const send = (res: ServerResponse, status: number, body?: unknown, headers: Record<string, string> = {}) => {
     const isText = typeof body === 'string';
@@ -161,12 +167,14 @@ export async function startFakeGitLab(opts: { files: Record<string, string>; por
         }
         target.files = draft;
         target.head = id;
+        history.set(id, new Map(draft));
         if (created) branches.set(b.branch, target);
         return send(res, 201, { id });
       }
 
       if (rest === 'merge_requests' && method === 'POST') {
         const b = (body ?? {}) as { source_branch: string; target_branch: string; title: string; description?: string; labels?: string };
+        if (!branches.has(b.source_branch)) return send(res, 400, { message: `source_branch ${b.source_branch} не существует` });
         const iid = mrs.length + 1;
         const mr: Mr = {
           iid, title: b.title, description: b.description ?? '', source_branch: b.source_branch, target_branch: b.target_branch,
@@ -199,6 +207,7 @@ export async function startFakeGitLab(opts: { files: Record<string, string>; por
       const id = nextId();
       main.files.set(path, { content, commit: id });
       main.head = id;
+      history.set(id, new Map(main.files));
     },
     close: () => new Promise<void>((ok) => { server.closeAllConnections(); server.close(() => ok()); }),
   };
