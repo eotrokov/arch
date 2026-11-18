@@ -1,8 +1,9 @@
-// Сборка редактора в каталог: index.html, editor.js (IIFE), editor.css, config.json (если задан).
+// Сборка редактора: бандл в каталог (index.html, editor.js, editor.css, config.json) и раскладка сайта для Pages.
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { build } from 'esbuild';
 import type { EditorConfig } from '../../editor/config.js';
+import { run, type Io } from '../cli.js';
 import { toolRoot } from './html.js';
 
 export async function buildEditor(outDir: string, cfg: EditorConfig | null): Promise<void> {
@@ -19,4 +20,38 @@ export async function buildEditor(outDir: string, cfg: EditorConfig | null): Pro
   writeFileSync(join(outDir, 'editor.css'), css);
   copyFileSync(join(root, 'editor', 'index.html'), join(outDir, 'index.html'));
   if (cfg) writeFileSync(join(outDir, 'config.json'), JSON.stringify(cfg, null, 2) + '\n');
+}
+
+/**
+ * config.json из переменных окружения CI. Пустой ARCH_OAUTH_CLIENT_ID — null (config.json не пишется, запасной режим);
+ * client id задан, а адреса нет — ошибка (иначе редактор молча ушёл бы в запасной режим или на неверный GitLab).
+ */
+export function editorConfigFromEnv(env: Record<string, string | undefined>): EditorConfig | null {
+  const v = (k: string) => (env[k] ?? '').trim();
+  const clientId = v('ARCH_OAUTH_CLIENT_ID');
+  if (!clientId) return null;
+  const missing = ['ARCH_GITLAB_URL', 'ARCH_PROJECT_PATH', 'ARCH_REDIRECT_URI'].filter((k) => !v(k));
+  if (missing.length) throw new Error(`editor:build: задан ARCH_OAUTH_CLIENT_ID, но не заданы ${missing.join(', ')}`);
+  return {
+    gitlabUrl: v('ARCH_GITLAB_URL').replace(/\/+$/, ''),
+    projectPath: v('ARCH_PROJECT_PATH'),
+    oauthClientId: clientId,
+    redirectUri: v('ARCH_REDIRECT_URI'),
+    baseBranch: v('ARCH_BASE_BRANCH') || 'main',
+  };
+}
+
+/**
+ * Сайт для Pages: `arch-views build` в out/ (просмотрщик index.html, model.json, mermaid/) и редактор в out/editor/
+ * с копией model.json рядом — запасной режим читает её относительным адресом `model.json`.
+ * Возвращает код `arch-views build` (0 или 1 — нарушения правил, сайт собран); код 2 (модель не загрузилась) — исключение.
+ */
+export async function buildEditorSite(root: string, out: string, cfg: EditorConfig | null, io: Io): Promise<number> {
+  const dist = resolve(out);
+  const code = await run(['build', '--root', resolve(root), '--out', dist], io);
+  if (code === 2) throw new Error('arch-views build: модель не загрузилась (код 2) — редактор не собран');
+  const editorDir = join(dist, 'editor');
+  await buildEditor(editorDir, cfg);
+  copyFileSync(join(dist, 'model.json'), join(editorDir, 'model.json'));
+  return code;
 }

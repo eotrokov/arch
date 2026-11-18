@@ -1,5 +1,5 @@
-// Временный стенд редактора: сборка в _dist/editor, статический сервер и фейковый GitLab с демо-моделью.
-// `npm run editor:dev` — режим gitlab; `npm run editor:dev -- --offline` — запасной режим (model.json рядом).
+// Стенд редактора для разработки: сборка в _dist/editor, статический сервер и фейковый GitLab с демо-моделью.
+// `npm run editor:serve` — режим gitlab; `npm run editor:serve -- --offline` — запасной режим (model.json рядом).
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, join, normalize } from 'node:path';

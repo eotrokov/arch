@@ -12,6 +12,8 @@ export interface FakeGitLab {
   setFile(path: string, content: string): void;
   /** Удаляет файл в main отдельным коммитом. */
   deleteFile(path: string): void;
+  /** Отзывает выданный токен: дальше API отвечает 401, новый вход через OAuth выдаёт новый токен. */
+  revokeToken(): void;
   close(): Promise<void>;
 }
 
@@ -33,6 +35,8 @@ export async function startFakeGitLab(opts: { files: Record<string, string>; por
   const codes = new Map<string, { challenge: string; clientId: string; redirectUri: string }>();
   const requests: FakeRequest[] = [];
   let baseUrl = '';
+  let token = FAKE_TOKEN;
+  let revoked = 0;
 
   // Снимки файлов по каждому коммиту: start_sha/ref могут указывать на уже устаревшую голову ветки.
   const history = new Map<string, Map<string, FileEntry>>([[initial, new Map(mainFiles)]]);
@@ -95,10 +99,10 @@ export async function startFakeGitLab(opts: { files: Record<string, string>; por
         const ok = b.grant_type === 'authorization_code' && expected !== undefined
           && b64url(createHash('sha256').update(b.code_verifier ?? '').digest()) === expected.challenge;
         if (!ok) return send(res, 400, { error: 'invalid_grant', error_description: 'PKCE: code_verifier не соответствует code_challenge' });
-        return send(res, 200, { access_token: FAKE_TOKEN, token_type: 'Bearer', scope: 'api' });
+        return send(res, 200, { access_token: token, token_type: 'Bearer', scope: 'api' });
       }
 
-      if (req.headers.authorization !== `Bearer ${FAKE_TOKEN}`) return send(res, 401, { message: '401 Unauthorized' });
+      if (req.headers.authorization !== `Bearer ${token}`) return send(res, 401, { message: '401 Unauthorized' });
       if (path === '/api/v4/user') return send(res, 200, { id: 1, username: 'tester', name: 'Тестовый Пользователь' });
 
       const m = /^\/api\/v4\/projects\/[^/]+\/(.*)$/.exec(path);
@@ -217,6 +221,9 @@ export async function startFakeGitLab(opts: { files: Record<string, string>; por
       main.files.delete(path);
       main.head = id;
       history.set(id, new Map(main.files));
+    },
+    revokeToken() {
+      token = `${FAKE_TOKEN}-${++revoked}`;
     },
     close: () => new Promise<void>((ok) => { server.closeAllConnections(); server.close(() => ok()); }),
   };
