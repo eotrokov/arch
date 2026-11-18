@@ -2,6 +2,7 @@
 import { loadConfig, type EditorConfig } from '../config.js';
 import { GitLabClient, GitLabError } from '../gitlab/api.js';
 import { authorizeUrl, createPkce, exchangeCode } from '../gitlab/oauth.js';
+import { randomSuffix } from '../mr.js';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const f: typeof fetch = (input, init) => fetch(input, init);
@@ -32,14 +33,10 @@ function fail(step: string, e: unknown): void {
   log(false, `${step}: ${kind} — ${e instanceof Error ? e.message : String(e)}`);
 }
 
-function rand4(): string {
-  return Array.from(crypto.getRandomValues(new Uint8Array(4)), (b) => 'abcdefghijklmnopqrstuvwxyz0123456789'[b % 36]).join('');
-}
-
 async function login(): Promise<void> {
   if (!cfg) return;
   const { verifier, challenge } = await createPkce();
-  const state = rand4() + rand4() + rand4();
+  const state = randomSuffix(12);
   sessionStorage.setItem(SS_VERIFIER, verifier);
   sessionStorage.setItem(SS_STATE, state);
   location.href = authorizeUrl(cfg, challenge, state);
@@ -84,14 +81,12 @@ async function readModel(): Promise<void> {
 
 async function createMr(): Promise<void> {
   if (!client || !cfg) return;
-  let step = 'Ветка';
+  let step = 'Коммит';
   try {
-    const head = await client.branchHead(cfg.baseBranch);
-    const branch = `arch/spike-${rand4()}`;
+    const branch = `arch/spike-${randomSuffix()}`;
     const iso = new Date().toISOString();
-    step = 'Коммит';
     await client.createCommit({
-      branch, startSha: head, message: 'arch: проверка редактора',
+      branch, startBranch: cfg.baseBranch, message: 'arch: проверка редактора',
       actions: [{ action: 'create', file_path: `_spike/${iso}.txt`, content: `Проверка редактора arch, ${iso}\n` }],
     });
     step = 'MR';

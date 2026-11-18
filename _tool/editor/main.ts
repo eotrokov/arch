@@ -5,10 +5,11 @@ import { GitLabClient, GitLabError } from './gitlab/api.js';
 import { authorizeUrl, createPkce, exchangeCode } from './gitlab/oauth.js';
 import { pickLists, validateFiles, type FileMap, type PickLists, type Validation } from './model.js';
 import { Cart, applyCart, isSharedPath, loadDraft, reconcile, saveDraft, type Change } from './cart.js';
-import { deleteChange, startEdit, startNew, toChange, type WizardKind, type WizardState } from './forms.js';
+import { deleteChange, nameError, startEdit, startNew, toChange, type WizardKind, type WizardState } from './forms.js';
 import { h } from './fields.js';
 import { Wizard } from './wizard.js';
-import { doneView, renderReview, submitting, type ReviewHost } from './review.js';
+import { doneView, renderReview, submitting, type ReviewHost, type Status } from './review.js';
+import { randomSuffix } from './mr.js';
 import type { Finding } from '../src/model/types.js';
 import type { LoadError } from '../src/model/raw.js';
 import { stepOfFinding } from './forms.js';
@@ -42,7 +43,6 @@ const SS_VERIFIER = 'arch-editor:verifier';
 const SS_STATE = 'arch-editor:state';
 const DEBOUNCE_MS = 300;
 const EMPTY: Validation = { tree: null, model: null, loadErrors: [], findings: [], ok: false };
-const TEAM_ID_RE = /^[a-z][a-z0-9-]*$/;
 
 let doc: Document;
 let deps: Deps;
@@ -96,14 +96,10 @@ export function handleError(e: unknown, what: string): void {
 
 // ---- вход ----
 
-function rand(n: number): string {
-  return Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) => 'abcdefghijklmnopqrstuvwxyz0123456789'[b % 36]).join('');
-}
-
 async function login(): Promise<void> {
   const cfg = app.cfg!;
   const { verifier, challenge } = await createPkce();
-  const state = rand(16);
+  const state = randomSuffix(16);
   try {
     deps.session.setItem(SS_VERIFIER, verifier);
     deps.session.setItem(SS_STATE, state);
@@ -245,9 +241,8 @@ function blobOf(path: string): string | null {
 function currentChange(): { change: Change | null; error: string | null } {
   const st = app.wizard;
   if (!st) return { change: null, error: null };
-  if (st.kind === 'service' && !String(st.data.name ?? '')) return { change: null, error: 'Укажите имя сервиса.' };
-  if (st.kind === 'product' && !String(st.data.code ?? '')) return { change: null, error: 'Укажите код продукта.' };
-  if (st.kind === 'team' && !TEAM_ID_RE.test(st.team)) return { change: null, error: 'Id команды: латиница в нижнем регистре, цифры и дефис, с буквы.' };
+  const bad = nameError(st); // имя/код/id — часть пути файла: «Foo/bar», «../evil» вывели бы файл из раскладки модели
+  if (bad) return { change: null, error: bad };
   try {
     const change = toChange(st, st.isNew ? null : blobOf(st.path));
     if (st.isNew && change.path !== app.cartPath && change.path in applyCart(app.files, app.cart.changes())) {
@@ -319,11 +314,30 @@ function toCart(): void {
 }
 
 function removeService(path: string, id: string): void {
+  if (!doc.defaultView?.confirm(`Удалить сервис ${id}? Удаление попадёт в корзину; убрать его можно до создания MR.`)) return;
   if (path in app.files) app.cart.put(deleteChange(path, app.blobs[path] ?? null, id));
   else app.cart.remove(path);
   if (app.wizard && (app.wizard.path === path || app.cartPath === path)) closeWizard();
   toast(`В корзине: удаление сервиса ${id}`);
   cartChanged();
+}
+
+/** «Убрать из корзины»: правка файла отменяется; открытый на этом файле мастер закрывается, шаг проверки остаётся. */
+function removeFromCart(path: string): void {
+  if (submitting()) return toast('Дождитесь окончания создания MR', 'warn');
+  const label = pendingChanges().find((c) => c.path === path)?.label ?? path;
+  const editing = !!app.wizard && (app.cartPath === path || app.wizard.path === path || currentChange().change?.path === path);
+  app.cart.remove(path);
+  if (editing) {
+    app.wizard = undefined;
+    app.cartPath = undefined;
+    wizard = null;
+    standalone = true;
+  }
+  cartChanged();
+  if (wizard && app.step === 'review') wizard.go('review');
+  else wizard?.refresh();
+  toast(`Убрано из корзины: ${label}`);
 }
 
 // ---- мастер ----
@@ -389,7 +403,8 @@ function reviewHost(): ReviewHost {
     storage: deps.storage,
     done: mrCreated,
     error: handleError,
-    reload: () => void reload(),
+    reload: (notice) => void reload(notice),
+    remove: removeFromCart,
     busy: (on) => { ($('reload') as HTMLButtonElement).disabled = on; },
   };
 }
@@ -421,8 +436,11 @@ function mrCreated(webUrl: string): void {
   app.client?.openMrs(app.user!.username).then((mrs) => { app.openMrs = mrs; renderBanners(); }, (e) => handleError(e, 'Открытые MR'));
 }
 
-/** «Обновить»: модель заново из main; черновик сверяется с новым main (изменённые там файлы — в баннер конфликтов). */
-async function reload(): Promise<void> {
+/**
+ * «Обновить»: модель заново из main; черновик сверяется с новым main (изменённые там файлы — в баннер конфликтов).
+ * notice — main ушёл вперёд при отправке: после перезагрузки открыть «Проверка и MR» с этим сообщением.
+ */
+async function reload(notice?: string): Promise<void> {
   if (app.mode !== 'gitlab' || !app.client) return;
   if (submitting()) return toast('Дождитесь окончания создания MR', 'warn');
   // несохранённые поля мастера: в корзину (дальше сверка с main как у любой правки), иначе — с подтверждением
@@ -439,11 +457,15 @@ async function reload(): Promise<void> {
   wizard = null;
   standalone = false;
   await loadFromGitLab();
+  if (notice && doc.body.dataset.state === 'ready') {
+    standalone = true;
+    renderAll({ kind: 'warn', msg: [notice] });
+  }
 }
 
 // ---- отрисовка ----
 
-function renderAll(): void {
+function renderAll(reviewStatus?: Status): void {
   renderHeader();
   renderBanners();
   renderTree();
@@ -451,7 +473,7 @@ function renderAll(): void {
     const close = btn('Закрыть', 'ghost', () => { standalone = false; renderAll(); });
     const box = h('div', { class: 'review', id: 'review' });
     $('wizard').replaceChildren(h('div', { class: 'wiz-head' }, h('h2', {}, 'Проверка и MR'), h('span', { class: 'sp' }), close), box);
-    renderReview(box, reviewHost());
+    renderReview(box, reviewHost(), reviewStatus);
   } else if (!wizard) {
     $('wizard').replaceChildren(h('div', { class: 'intro' },
       h('h2', {}, 'Выберите элемент слева'),
@@ -552,7 +574,10 @@ function renderTree(): void {
         sl.append(h('li', { class: 'svc' }, item(p, base, 'сервис', 'service'),
           btn('✕', 'ghost icon', () => removeService(p, id), 'Удалить сервис')));
       }
-      for (const c of deleted) sl.append(h('li', { class: 'svc gone' }, h('span', {}, c.path.slice(prefix.length).replace(/\.ya?ml$/, '')), tag(c.path)));
+      for (const c of deleted) {
+        sl.append(h('li', { class: 'svc gone' }, h('span', {}, c.path.slice(prefix.length).replace(/\.ya?ml$/, '')), tag(c.path),
+          btn('↺', 'ghost icon', () => removeFromCart(c.path), 'Убрать из корзины')));
+      }
       sl.append(h('li', {}, btn('+ сервис', 'ghost add', () => create('service', team, code))));
       pl.append(h('li', {}, item(`${team}/${code}/product.yaml`, names.get(`${team}/${code}`) ?? code, code, 'product'), sl));
     }

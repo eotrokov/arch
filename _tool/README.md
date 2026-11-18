@@ -118,7 +118,7 @@ _dist/
     ├── editor.js     # бандл: всё внутри, без внешних CDN и шрифтов
     ├── editor.css
     ├── config.json   # из переменных ARCH_*; без ARCH_OAUTH_CLIENT_ID не пишется
-    └── model.json    # копия _dist/model.json для запасного режима
+    └── model.json    # копия _dist/model.json — только в запасном режиме (без ARCH_OAUTH_CLIENT_ID)
 ```
 
 | Переменная | Значение |
@@ -159,7 +159,7 @@ pages:
   rules: [ { if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH, exists: ["_shared/network.yaml"] } ]
 ```
 
-Просмотрщик открывается по адресу Pages, редактор — по `…/editor/`; `config.json` и `model.json` редактор читает относительными адресами из своего каталога. Если `arch/` лежит внутри другого репозитория, добавьте префикс `arch/` к путям (`cd arch/_tool`, `cp arch/_dist/…`). Для `editor:build` нужна полная установка `npm ci` (скрипт запускается через `tsx` из `devDependencies`). Страницы содержат модель целиком (`model.json` — исходные YAML), поэтому для закрытого проекта включите ограничение доступа к Pages (Pages access control).
+Просмотрщик открывается по адресу Pages, редактор — по `…/editor/`; `config.json` (режим GitLab) или `model.json` (запасной режим) редактор читает относительными адресами из своего каталога. Если `arch/` лежит внутри другого репозитория, добавьте префикс `arch/` к путям (`cd arch/_tool`, `cp arch/_dist/…`). Для `editor:build` нужна полная установка `npm ci` (скрипт запускается через `tsx` из `devDependencies`). Страницы содержат модель целиком (`model.json` — исходные YAML), поэтому для закрытого проекта включите ограничение доступа к Pages (Pages access control).
 
 ### Запасной режим
 

@@ -133,6 +133,18 @@ describe('buildEditorSite (раскладка для Pages)', () => {
     expect(m.builtAt).toMatch(/^\d{4}-/);
   });
 
+  it('режим GitLab (config задан): config.json есть, копии model.json в editor/ нет', async () => {
+    const o = mkdtempSync(join(tmpdir(), 'arch-editor-site-gl-'));
+    try {
+      const cfg = { gitlabUrl: 'https://gitlab.example.org', projectPath: 'grp/arch', oauthClientId: 'cid', redirectUri: 'https://pages/editor/', baseBranch: 'main' };
+      await buildEditorSite('examples/demo', o, cfg, { stdout: () => {}, stderr: () => {} });
+      expect(readdirSync(join(o, 'editor')).sort()).toEqual(['config.json', 'editor.css', 'editor.js', 'index.html']);
+      expect(existsSync(join(o, 'model.json'))).toBe(true);
+    } finally {
+      rmSync(o, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   it('ошибка загрузки модели (код 2) — исключение, ничего не собрано', async () => {
     const bad = mkdtempSync(join(tmpdir(), 'arch-editor-bad-'));
     try {

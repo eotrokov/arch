@@ -123,6 +123,7 @@ details.file{border:1px solid var(--line);border-radius:8px;margin:6px 0;min-wid
 details.file summary{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;padding:7px 10px;cursor:pointer;font-size:13px}
 details.file summary code{color:var(--muted);overflow-wrap:anywhere}
 details.file .chg{margin-left:0}
+details.file .file-actions{display:flex;justify-content:flex-end;padding:0 10px 6px}
 .stat{margin-left:auto;font:12px var(--font-mono)}
 .stat .add,.diff .add{color:var(--open)} .stat .rm,.diff .rm{color:var(--err)}
 .diff{margin:0;padding:8px 10px;border-top:1px solid var(--line);font:12px/1.5 var(--font-mono);overflow:auto;max-height:420px;white-space:pre}

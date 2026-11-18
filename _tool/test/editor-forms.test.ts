@@ -3,7 +3,7 @@ import { readModel } from '../src/model/load.js';
 import { validateFiles } from '../editor/model.js';
 import { platformNames } from '../src/model/names.js';
 import {
-  STEPS, READONLY_FIELDS, unknownFields, startNew, startEdit, toChange, deleteChange, stepOfFinding, previewNames,
+  STEPS, READONLY_FIELDS, unknownFields, startNew, startEdit, toChange, deleteChange, stepOfFinding, previewNames, nameError,
 } from '../editor/forms.js';
 
 const demo = readModel('examples/demo').files;
@@ -148,5 +148,23 @@ describe('мастер: выведенные имена совпадают с м
     expect(n.repoUrl).toBe(node.names!.repoUrl);
     expect(n.repoUrl).toBe('https://gitlab.company.ru/crm/crm-orders');
     expect(n).toEqual(node.names);
+  });
+});
+
+describe('мастер: имя/код/id не выводят файл из раскладки модели', () => {
+  it('Foo/bar, ../evil, .hidden, _x, обратный слэш — ошибка на шаге «Основное»; обычные имена — нет', () => {
+    const svc = (name: string) => ({ ...startNew('service', 'sales', 'crm'), data: { name } });
+    for (const bad of ['Foo/bar', '../evil', '.hidden', '_x', 'a\\b']) {
+      expect(nameError(svc(bad)), bad).toMatch(/Имя сервиса/);
+      expect(nameError({ ...startNew('product', 'sales'), data: { code: bad, name: 'N' } }), bad).toMatch(/Код продукта/);
+      expect(nameError({ ...startNew('team', bad), data: { name: 'N' } }), bad).toMatch(/Id команды/);
+    }
+    expect(nameError(svc(''))).toBe('Укажите имя сервиса.');
+    expect(nameError({ ...startNew('product', 'sales'), data: { code: '', name: '' } })).toBe('Укажите код продукта.');
+    expect(nameError(svc('notify2'))).toBeNull();
+    expect(nameError(svc('Orders'))).toBeNull(); // остальное — дело проверки naming.pattern
+    expect(nameError({ ...startNew('product', 'sales'), data: { code: 'crm2', name: 'N' } })).toBeNull();
+    expect(nameError({ ...startNew('team', 'ops'), data: { name: 'N' } })).toBeNull();
+    expect(nameError(startEdit('service', svcPath, demo[svcPath]!))).toBeNull();
   });
 });

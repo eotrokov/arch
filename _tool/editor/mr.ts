@@ -10,6 +10,11 @@ const TRANSLIT: Record<string, string> = {
   ы: 'y', э: 'e', ю: 'yu', я: 'ya', ь: '', ъ: '',
 };
 
+/** n случайных символов [a-z0-9] (crypto): суффикс ветки MR, state OAuth. */
+export function randomSuffix(n = 4): string {
+  return Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) => 'abcdefghijklmnopqrstuvwxyz0123456789'[b % 36]).join('');
+}
+
 /** `arch/<slug>-<rnd()>`: slug — транслит заголовка, только [a-z0-9-], до 40 символов, не пустой. */
 export function branchName(title: string, rnd: () => string): string {
   const slug = [...title.toLowerCase()].map((c) => TRANSLIT[c] ?? c).join('')

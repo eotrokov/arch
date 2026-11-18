@@ -3,11 +3,12 @@ import { resolve } from 'node:path';
 import { readModelFiles } from '../src/model/load.js';
 import { GitLabClient, GitLabError } from '../editor/gitlab/api.js';
 import type { EditorConfig } from '../editor/config.js';
-import { Cart, loadDraft, saveDraft, type Change } from '../editor/cart.js';
+import { Cart, applyCart, loadDraft, reconcile, saveDraft, type Change } from '../editor/cart.js';
+import { validateFiles } from '../editor/model.js';
 import type { Validation } from '../editor/model.js';
 import type { AppState } from '../editor/main.js';
 import type { Finding } from '../src/model/types.js';
-import { lineDiff, reviewSummary, submit, submitting } from '../editor/review.js';
+import { MAIN_MOVED_MESSAGE, MainMovedError, lineDiff, reviewSummary, submit, submitting } from '../editor/review.js';
 import { FAKE_TOKEN, startFakeGitLab, type FakeGitLab } from './fake-gitlab.js';
 
 class MemStorage implements Storage {
@@ -74,6 +75,21 @@ describe('reviewSummary', () => {
   it('пустая корзина — нельзя', () => {
     expect(reviewSummary(val({}), []).canSubmit).toBe(false);
   });
+  it('файл вне раскладки модели (его не читают проверки) блокирует MR; удаление — нет', () => {
+    const files = readModelFiles(resolve(__dirname, '../examples/demo'));
+    for (const path of ['sales/crm/services/Foo/bar.yaml', 'sales/crm/services/../evil.yaml', 'sales/crm/evil.yaml', 'sales/crm/services/x.txt']) {
+      const changes: Change[] = [{ path, content: 'name: x\nsegment: app\ncluster: k8s-prod-1\n', baseBlobId: null, label: 'Новый сервис' }];
+      const v = validateFiles(applyCart(files, changes));
+      expect(v.ok, path).toBe(true); // проверки этот файл не видят
+      const s = reviewSummary(v, changes);
+      expect(s.canSubmit, path).toBe(false);
+      expect(s.errors.map((e) => e.file), path).toEqual([path]);
+    }
+    const del: Change[] = [{ path: 'sales/crm/services/orders-job.yaml', content: null, baseBlobId: 'b', label: 'Удаление' }];
+    expect(reviewSummary(validateFiles(applyCart(files, del)), del).canSubmit).toBe(true);
+    const ok: Change[] = [{ path: 'sales/crm/services/orders.yaml', content: files['sales/crm/services/orders.yaml'] + '# x\n', baseBlobId: 'b', label: 'Изменение' }];
+    expect(reviewSummary(validateFiles(applyCart(files, ok)), ok).canSubmit).toBe(true);
+  });
 });
 
 const ORDERS = 'sales/crm/services/orders.yaml';
@@ -108,22 +124,19 @@ describe('submit с фейковым GitLab', () => {
   };
   const posts = (suffix: string) => fake.requests.filter((r) => r.method === 'POST' && r.path.endsWith(suffix));
 
-  it('успех: коммит от текущей головы main с last_commit_id на момент загрузки, MR, корзина и черновик очищены', async () => {
+  it('успех: коммит от start_branch=main (не start_sha) с last_commit_id на baseSha, MR, корзина и черновик очищены', async () => {
     const app = await loadApp();
     put(app, { path: ORDERS, content: demo[ORDERS] + '# правка\n', label: 'Изменение сервиса crm-orders' });
     put(app, { path: NEW_SVC, content: 'name: audit\ntype: worker\n', label: 'Новый сервис crm-audit-worker' });
     put(app, { path: JOB, content: null, label: 'Удаление сервиса crm-orders-job' });
-    // main ушёл вперёд по другому файлу: коммит всё равно проходит, start_sha — новая голова
-    fake.setFile('sales/pay/services/billing.yaml', demo['sales/pay/services/billing.yaml'] + '# чужая правка\n');
-    const head = await new GitLabClient(cfg, FAKE_TOKEN, fetch).branchHead('main');
-    expect(head).not.toBe(app.baseSha);
 
     const res = await submit(app, 'CRM: аудит', 'описание', rnd, storage);
 
     expect(res.webUrl).toMatch(/^http:\/\/.+\/merge_requests\/1$/);
-    const commit = posts('/repository/commits')[0]!.body as { branch: string; start_sha: string; commit_message: string; actions: Record<string, string>[] };
+    const commit = posts('/repository/commits')[0]!.body as { branch: string; start_branch?: string; start_sha?: string; commit_message: string; actions: Record<string, string>[] };
     expect(commit.branch).toBe('arch/crm-audit-ab12');
-    expect(commit.start_sha).toBe(head);
+    expect(commit.start_branch).toBe('main');
+    expect(commit.start_sha).toBeUndefined();
     expect(commit.commit_message).toBe('arch: CRM: аудит');
     const upd = commit.actions.find((a) => a.file_path === ORDERS)!;
     expect(upd.action).toBe('update');
@@ -136,25 +149,66 @@ describe('submit с фейковым GitLab', () => {
     expect(loadDraft(storage, cfg.projectPath)).toEqual([]);
   });
 
-  it('файл изменён в main после загрузки: понятная ошибка с путём, корзина и черновик сохранены, MR нет', async () => {
+  it('main ушёл вперёд (другой файл) до отправки: ничего не пишется, MainMovedError, корзина и черновик целы', async () => {
+    const app = await loadApp();
+    put(app, { path: ORDERS, content: demo[ORDERS] + '# правка\n', label: 'Изменение сервиса crm-orders' });
+    fake.setFile('sales/pay/services/billing.yaml', demo['sales/pay/services/billing.yaml'] + '# чужая правка\n');
+
+    const err = await submit(app, 'Правка', 'd', rnd, storage).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(MainMovedError);
+    expect((err as Error).message).toBe(MAIN_MOVED_MESSAGE);
+    expect(posts('/repository/commits')).toHaveLength(0);
+    expect(posts('/merge_requests')).toHaveLength(0);
+    expect(app.cart.changes()).toHaveLength(1);
+    expect(loadDraft(storage, cfg.projectPath)).toHaveLength(1);
+    expect(submitting()).toBe(false); // «Обновить» после ошибки не заблокирован
+  });
+
+  it('файл изменён в main до отправки: ничего не пишется; после перезагрузки модели правка — конфликт, прочие правки на месте', async () => {
     const app = await loadApp();
     put(app, { path: ORDERS, content: demo[ORDERS] + '# моя правка\n', label: 'Изменение сервиса crm-orders' });
-    fake.setFile(ORDERS, demo[ORDERS] + '# чужая правка\n');
+    put(app, { path: NEW_SVC, content: 'name: audit\ntype: worker\n', label: 'Новый сервис crm-audit-worker' });
+    const theirs = demo[ORDERS] + '# чужая правка\n';
+    fake.setFile(ORDERS, theirs);
+
+    const err = await submit(app, 'Правка', 'd', rnd, storage).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(MainMovedError);
+    expect(posts('/repository/commits')).toHaveLength(0);
+
+    // путь reload() в main.ts: черновик → модель на новой голове → сверка по blob id
+    const m = await new GitLabClient(cfg, FAKE_TOKEN, fetch).loadModel('main');
+    const { applied, conflicts } = reconcile(loadDraft(storage, cfg.projectPath), m.blobs);
+    expect(conflicts.map((c) => c.path)).toEqual([ORDERS]);
+    expect(applied.map((c) => c.path)).toEqual([NEW_SVC]);
+    expect(await new GitLabClient(cfg, FAKE_TOKEN, fetch).rawFile(ORDERS, 'main')).toBe(theirs);
+  });
+
+  /** main меняется между branchHead и коммитом: правку вносит fetch прямо перед POST /repository/commits. */
+  const raceFetch = (mutate: () => void): typeof fetch => (input, init) => {
+    if (String(input).endsWith('/repository/commits') && init?.method === 'POST') mutate();
+    return fetch(input, init);
+  };
+
+  it('гонка: файл изменён в main после проверки головы — GitLab отклоняет по start_branch, main не перезаписан, MR нет', async () => {
+    const theirs = demo[ORDERS] + '# чужая правка\n';
+    const app = await loadApp(raceFetch(() => fake.setFile(ORDERS, theirs)));
+    put(app, { path: ORDERS, content: demo[ORDERS] + '# моя правка\n', label: 'Изменение сервиса crm-orders' });
 
     const err = await submit(app, 'Правка', 'd', rnd, storage).catch((e: unknown) => e);
 
     expect(err).toBeInstanceOf(GitLabError);
     expect((err as GitLabError).kind).toBe('conflict');
     expect((err as Error).message).toBe(`Файл ${ORDERS} изменён в main после загрузки — обновите модель (кнопка «Обновить»), ваши правки сохранены`);
+    expect(await new GitLabClient(cfg, FAKE_TOKEN, fetch).rawFile(ORDERS, 'main')).toBe(theirs);
     expect(app.cart.changes()).toHaveLength(1);
     expect(loadDraft(storage, cfg.projectPath)).toHaveLength(1);
     expect(posts('/merge_requests')).toHaveLength(0);
   });
 
-  it('новый файл появился в main после загрузки (already exists) — тот же конфликт', async () => {
-    const app = await loadApp();
+  it('гонка: новый файл появился в main (already exists) — тот же конфликт', async () => {
+    const app = await loadApp(raceFetch(() => fake.setFile(NEW_SVC, 'name: audit\ntype: worker\n# чужой\n')));
     put(app, { path: NEW_SVC, content: 'name: audit\ntype: worker\n', label: 'Новый сервис crm-audit-worker' });
-    fake.setFile(NEW_SVC, 'name: audit\ntype: worker\n# чужой\n');
 
     const err = await submit(app, 'Новый', 'd', rnd, storage).catch((e: unknown) => e);
 
@@ -163,11 +217,10 @@ describe('submit с фейковым GitLab', () => {
     expect(app.cart.isEmpty()).toBe(false);
   });
 
-  it('удаляемый файл уже удалён в main (doesn\'t exist) — тот же конфликт', async () => {
-    const app = await loadApp();
+  it('гонка: удаляемый файл уже удалён в main (doesn\'t exist) — тот же конфликт', async () => {
+    const app = await loadApp(raceFetch(() => fake.deleteFile(JOB)));
     put(app, { path: ORDERS, content: demo[ORDERS] + '# ок\n', label: 'Изменение сервиса crm-orders' });
     put(app, { path: JOB, content: null, label: 'Удаление сервиса crm-orders-job' });
-    fake.deleteFile(JOB);
 
     const err = await submit(app, 'Удаление', 'd', rnd, storage).catch((e: unknown) => e);
 

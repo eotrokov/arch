@@ -116,8 +116,7 @@ describe('GitLab: загрузка модели и MR', () => {
 
   it('openMrs: свои открытые MR с меткой', async () => {
     expect(await client.openMrs('tester')).toEqual([]);
-    const head = await client.branchHead('main');
-    await client.createCommit({ branch: 'arch/x-ab12', startSha: head, message: 'arch: t', actions: [{ action: 'create', file_path: 'n.txt', content: 'x' }] });
+    await client.createCommit({ branch: 'arch/x-ab12', startBranch: 'main', message: 'arch: t', actions: [{ action: 'create', file_path: 'n.txt', content: 'x' }] });
     const mr = await client.createMr({ sourceBranch: 'arch/x-ab12', title: 'T', description: 'D' });
     expect(await client.openMrs('tester')).toEqual([{ iid: mr.iid, title: 'T', webUrl: mr.webUrl }]);
     expect(await client.openMrs('other')).toEqual([]);
@@ -134,9 +133,9 @@ describe('GitLab: загрузка модели и MR', () => {
     const path = Object.keys(m.files).find((p) => p.endsWith('product.yaml'))!;
     const lastId = await client.lastCommitId(path, m.baseSha);
     fake.setFile(path, m.files[path]! + '# чужая правка\n');
-    // ветка MR создаётся от текущей головы main: GitLab сверяет last_commit_id с ней, а не со старой базой
+    // ветка MR создаётся от start_branch=main: GitLab сверяет last_commit_id с текущими файлами main
     const err = await client
-      .createCommit({ branch: 'arch/y-ab12', startSha: await client.branchHead('main'), message: 'm', actions: commitActions([ch(path, 'z: 1\n', m.blobs[path]!, 'l')], { [path]: lastId }) })
+      .createCommit({ branch: 'arch/y-ab12', startBranch: 'main', message: 'm', actions: commitActions([ch(path, 'z: 1\n', m.blobs[path]!, 'l')], { [path]: lastId }) })
       .catch((e) => e);
     expect(err).toBeInstanceOf(GitLabError);
     expect(err.kind).toBe('conflict');

@@ -148,13 +148,17 @@ export async function startFakeGitLab(opts: { files: Record<string, string>; por
 
       if (rest === 'repository/commits' && method === 'POST') {
         const b = (body ?? {}) as { branch: string; start_sha?: string; start_branch?: string; actions: { action: string; file_path: string; content?: string; last_commit_id?: string }[] };
+        if (b.start_sha !== undefined && b.start_branch !== undefined) return send(res, 400, { message: 'start_branch, start_sha are mutually exclusive' });
         let target = branches.get(b.branch);
         const created = !target;
         if (!target) {
-          const start = resolveRef(b.start_sha ?? b.start_branch ?? '');
-          if (!start) return send(res, 400, { message: 'start_sha не найден' });
+          const start = b.start_sha !== undefined ? resolveRef(b.start_sha) : branches.get(b.start_branch ?? '');
+          if (!start) return send(res, 400, { message: b.start_sha !== undefined ? 'start_sha не найден' : `Invalid reference name: ${b.start_branch}` });
           target = { head: start.head, files: new Map(start.files) };
         }
+        // Как в GitLab (lib/api/commits.rb: start_branch ||= branch unless start_sha; Files::BaseService#file_has_changed?):
+        // last_commit_id сверяется с текущими файлами start_branch (или самой ветки), а при start_sha не проверяется вовсе.
+        const checkLastCommit = b.start_sha === undefined;
         const draft = new Map(target.files);
         const id = nextId();
         for (const a of b.actions) {
@@ -165,7 +169,7 @@ export async function startFakeGitLab(opts: { files: Record<string, string>; por
             continue;
           }
           if (!cur) return send(res, 400, { message: `A file with this name doesn't exist: ${a.file_path}` });
-          if (a.last_commit_id !== cur.commit) {
+          if (checkLastCommit && a.last_commit_id !== undefined && a.last_commit_id !== cur.commit) {
             return send(res, 400, { message: 'You are attempting to update a file that has changed since you started editing it.' });
           }
           if (a.action === 'delete') draft.delete(a.file_path);

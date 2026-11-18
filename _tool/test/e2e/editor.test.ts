@@ -25,7 +25,7 @@ const sha1 = (s: string) => createHash('sha1').update(s).digest('hex');
 /** Фейк нумерует коммиты sha1('c1'), sha1('c2')…: начальное состояние main — первый коммит. */
 const INITIAL_COMMIT = sha1('c1');
 
-type Commit = { branch: string; start_sha: string; commit_message: string; actions: { action: string; file_path: string; content?: string; last_commit_id?: string }[] };
+type Commit = { branch: string; start_branch?: string; start_sha?: string; commit_message: string; actions: { action: string; file_path: string; content?: string; last_commit_id?: string }[] };
 
 describe.skipIf(!hasChrome)('редактор: сценарии в Chrome с фальшивым GitLab', () => {
   const demo = readModelFiles('examples/demo');
@@ -42,6 +42,9 @@ describe.skipIf(!hasChrome)('редактор: сценарии в Chrome с ф�
   const external: string[] = [];
   /** Цели, кроме самой вкладки сценария (воркеры, service worker, всплывающие окна): их запросы page.on('request') не видит. */
   const targets: string[] = [];
+  /** Тексты confirm/alert; confirm «Удалить сервис…» принимается, если acceptDelete, остальные диалоги отклоняются. */
+  const dialogs: string[] = [];
+  let acceptDelete = true;
 
   beforeAll(async () => {
     tmp = mkdtempSync(join(tmpdir(), 'arch-e2e-editor-'));
@@ -83,6 +86,8 @@ describe.skipIf(!hasChrome)('редактор: сценарии в Chrome с ф�
     errors.length = 0;
     external.length = 0;
     targets.length = 0;
+    dialogs.length = 0;
+    acceptDelete = true;
     if (online) {
       fake = await startFakeGitLab({ files: demo });
       cfgJson = JSON.stringify({ gitlabUrl: fake.url, projectPath: 'grp/arch', oauthClientId: 'e2e-client', redirectUri: editorUrl, baseBranch: 'main' });
@@ -99,7 +104,10 @@ describe.skipIf(!hasChrome)('редактор: сценарии в Chrome с ф�
       if (/^(data|blob|about):/.test(u) || u.startsWith(`${origin}/`) || (fake && u.startsWith(`${fake.url}/`))) return;
       external.push(u);
     });
-    page.on('dialog', (d) => void d.dismiss());
+    page.on('dialog', (d) => {
+      dialogs.push(d.message());
+      void (acceptDelete && /^Удалить сервис/.test(d.message()) ? d.accept() : d.dismiss());
+    });
     return page;
   }
 
@@ -215,7 +223,9 @@ describe.skipIf(!hasChrome)('редактор: сценарии в Chrome с ф�
 
     const [c] = commits();
     expect(c!.branch).toMatch(/^arch\/[a-z0-9-]+-[a-z0-9]{4}$/);
-    expect(c!.start_sha).toBe(INITIAL_COMMIT);
+    // start_branch, не start_sha: только так GitLab сверяет last_commit_id с текущим main
+    expect(c!.start_branch).toBe('main');
+    expect(c!.start_sha).toBeUndefined();
     expect(c!.commit_message).toMatch(/^arch: /);
     expect(c!.actions.map((a) => [a.action, a.file_path])).toEqual([['create', 'sales/crm/services/notify2-worker.yaml']]);
     expect(c!.actions[0]!.content).toContain('cluster: k8s-prod-2');
@@ -249,28 +259,58 @@ describe.skipIf(!hasChrome)('редактор: сценарии в Chrome с ф�
     clean();
   });
 
-  it('3. файл изменён в main после загрузки: понятное сообщение, корзина цела, main не перезаписан', async () => {
+  it('3. main ушёл вперёд: ничего не пишется, модель перезагружается; изменённый файл — конфликт, корзина в черновике, main не перезаписан', async () => {
     const page = await setup(true);
     await login(page);
     await editOrdersCluster(page);
-    const theirs = `${demo[ORDERS]}# правка коллеги в main\n`;
-    fake!.setFile(ORDERS, theirs);
     await openReview(page);
     await page.waitForSelector('#createMr:not([disabled])', { timeout: T });
+    const moved = (p: Page) => p.waitForFunction(() => (document.getElementById('mrStatus')?.textContent ?? '').includes('main обновился'), { timeout: T });
+
+    // (а) в main изменён другой файл: коммита нет, модель перезагружена, правка применена заново
+    fake!.setFile('sales/pay/services/billing.yaml', `${demo['sales/pay/services/billing.yaml']}# чужая правка\n`);
     await page.click('#createMr');
-    await page.waitForFunction(() => (document.getElementById('mrStatus')?.textContent ?? '').includes('изменён в main после загрузки'), { timeout: T });
-    expect(await text(page, '#mrStatus')).toContain(ORDERS);
+    await moved(page);
+    expect(await text(page, '#mrStatus')).toContain('модель перезагружена, проверьте изменения и отправьте снова');
+    expect(commits()).toEqual([]);
     expect(await text(page, '#cartCount')).toBe('Изменений: 1');
+    expect(await page.$('#conflicts')).toBeNull();
+    expect(await text(page, '#review')).toContain(ORDERS);
+
+    // (б) в main изменён сам orders.yaml: коммита нет, после перезагрузки правка — конфликт в баннере, в MR не войдёт
+    const theirs = `${demo[ORDERS]}# правка коллеги в main\n`;
+    fake!.setFile(ORDERS, theirs);
+    await page.waitForSelector('#createMr:not([disabled])', { timeout: T });
+    await page.click('#createMr');
+    await page.waitForSelector('#conflicts', { timeout: T });
+    await moved(page);
+    expect(await text(page, '#conflicts')).toContain(ORDERS);
+    expect(await text(page, '#conflictNote')).toContain('1 правка черновика ждёт решения и в MR не войдёт');
+    expect(await text(page, '#cartCount')).toBe('Изменений: 0');
+    const draft = await page.evaluate(() => localStorage.getItem('arch-editor:draft:grp/arch') ?? '');
+    expect(draft).toContain(ORDERS);
+    expect(draft).toContain('cluster: k8s-prod-2');
+    expect(commits()).toEqual([]);
     expect(mrPosts()).toEqual([]);
     expect(await mainFile(ORDERS)).toBe(theirs);
     clean();
   });
 
-  it('4. удаление pay-billing, на который ссылаются: MR недоступен, ошибка указывает на orders.yaml', async () => {
+  it('4. удаление pay-billing, на который ссылаются: подтверждение, MR недоступен, ошибка указывает на orders.yaml; убрать из корзины — MR снова доступен', async () => {
     const page = await setup(true);
     await login(page);
-    await treeClick(page, 'pay', 'billing', 'delete');
+    await editOrdersCluster(page);
+    await clickText(page, '.wiz-nav button.primary', 'В корзину');
     await page.waitForFunction(() => document.getElementById('cartCount')?.textContent === 'Изменений: 1', { timeout: T });
+    // отказ в подтверждении — удаления нет
+    acceptDelete = false;
+    await treeClick(page, 'pay', 'billing', 'delete');
+    expect(dialogs).toEqual(['Удалить сервис pay-billing? Удаление попадёт в корзину; убрать его можно до создания MR.']);
+    expect(await text(page, '#cartCount')).toBe('Изменений: 1');
+    acceptDelete = true;
+    await treeClick(page, 'pay', 'billing', 'delete');
+    await page.waitForFunction(() => document.getElementById('cartCount')?.textContent === 'Изменений: 2', { timeout: T });
+    expect(await page.$('#tree li.svc.gone button[aria-label="Убрать из корзины"]')).not.toBeNull();
     await page.click('#cartCount');
     await page.waitForSelector('#review #reviewStatus', { timeout: T });
     expect(await page.$eval('#createMr', (b) => (b as HTMLButtonElement).disabled)).toBe(true);
@@ -279,6 +319,13 @@ describe.skipIf(!hasChrome)('редактор: сценарии в Chrome с ф�
     const errs = findings.filter((f) => f.includes('ошибка'));
     expect(errs.some((f) => f.includes(ORDERS) && f.includes('pay-billing')), JSON.stringify(findings)).toBe(true);
     expect(commits()).toEqual([]);
+
+    await page.click('#review button[data-remove="sales/pay/services/billing.yaml"]');
+    await page.waitForFunction(() => document.getElementById('cartCount')?.textContent === 'Изменений: 1', { timeout: T });
+    await page.waitForFunction(() => (document.getElementById('reviewStatus')?.textContent ?? '').startsWith('Ошибок нет'), { timeout: T });
+    await page.waitForSelector('#createMr:not([disabled])', { timeout: T });
+    expect(await page.$('#review button[data-remove="sales/pay/services/billing.yaml"]')).toBeNull();
+    expect(await page.$('#tree li.svc.gone')).toBeNull();
     clean();
   });
 

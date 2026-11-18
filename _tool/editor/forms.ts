@@ -98,6 +98,31 @@ function pathOf(s: WizardState): string {
   return teamPath(s.team);
 }
 
+/** Сегмент пути файла модели: без «/» и «\\», не с «.» или «_» (как раскладка, которую читают редактор и arch:validate). */
+const PATH_SEGMENT = /^[^/\\._][^/\\]*$/;
+const TEAM_ID = /^[a-z][a-z0-9-]*$/;
+
+/**
+ * Ошибка шага «Основное»: имя сервиса, код продукта и id команды становятся частью пути файла.
+ * `Foo/bar` или `../evil` положили бы файл вне раскладки модели — его не прочитала бы ни одна проверка.
+ */
+export function nameError(s: WizardState): string | null {
+  const layout = ' — из него строится путь файла: без «/» и «\\», не с «.» или «_».';
+  if (s.kind === 'team') {
+    return TEAM_ID.test(s.team) ? null : 'Id команды: латиница в нижнем регистре, цифры и дефис, с буквы.';
+  }
+  if (!PATH_SEGMENT.test(s.team)) return `Id команды «${s.team}» не подходит для пути файла.`;
+  if (s.kind === 'product') {
+    const code = str(s.data.code);
+    if (!code) return 'Укажите код продукта.';
+    return PATH_SEGMENT.test(code) ? null : `Код продукта «${code}» недопустим${layout}`;
+  }
+  const name = str(s.data.name);
+  if (!name) return 'Укажите имя сервиса.';
+  if (!PATH_SEGMENT.test(name)) return `Имя сервиса «${name}» недопустимо${layout}`;
+  return PATH_SEGMENT.test(s.product ?? '') ? null : `Код продукта «${s.product ?? ''}» не подходит для пути файла.`;
+}
+
 export function toChange(s: WizardState, blobId: string | null): Change {
   const data = Object.fromEntries(Object.entries(s.data).filter(([k]) => !PSEUDO[s.kind].includes(k)));
   const path = pathOf(s);
@@ -115,7 +140,7 @@ export function toChange(s: WizardState, blobId: string | null): Change {
     }
   }
   return {
-    path, content: patchYaml(s.originalText ?? '', data), baseBlobId: blobId,
+    path, content: patchYaml(s.originalText ?? '', data, s.kind), baseBlobId: blobId,
     label: `${EDIT_LABEL[s.kind]} ${subject(s)}`,
   };
 }

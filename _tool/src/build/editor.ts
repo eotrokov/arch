@@ -42,8 +42,9 @@ export function editorConfigFromEnv(env: Record<string, string | undefined>): Ed
 }
 
 /**
- * Сайт для Pages: `arch-views build` в out/ (просмотрщик index.html, model.json, mermaid/) и редактор в out/editor/
- * с копией model.json рядом — запасной режим читает её относительным адресом `model.json`.
+ * Сайт для Pages: `arch-views build` в out/ (просмотрщик index.html, model.json, mermaid/) и редактор в out/editor/.
+ * Без cfg (запасной режим) рядом с редактором кладётся копия model.json — он читает её относительным адресом `model.json`;
+ * в режиме GitLab копия не нужна (модель читается из GitLab) и не пишется.
  * Возвращает код `arch-views build` (0 или 1 — нарушения правил, сайт собран); код 2 (модель не загрузилась) — исключение.
  */
 export async function buildEditorSite(root: string, out: string, cfg: EditorConfig | null, io: Io): Promise<number> {
@@ -52,6 +53,6 @@ export async function buildEditorSite(root: string, out: string, cfg: EditorConf
   if (code === 2) throw new Error('arch-views build: модель не загрузилась (код 2) — редактор не собран');
   const editorDir = join(dist, 'editor');
   await buildEditor(editorDir, cfg);
-  copyFileSync(join(dist, 'model.json'), join(editorDir, 'model.json'));
+  if (!cfg) copyFileSync(join(dist, 'model.json'), join(editorDir, 'model.json'));
   return code;
 }

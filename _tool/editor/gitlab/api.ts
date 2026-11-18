@@ -19,8 +19,8 @@ export class GitLabError extends Error {
 }
 
 const CHANGED_RE = /changed since|has changed|last_commit_id|was changed/i;
-/** Только о файле («A file with this name already exists» и т.п.); «A branch called … already exists» сюда не попадает. */
-const FILE_GONE_RE = /\bfile\b[^.]*?\b(already exists|doesn'?t exist|does not exist)/i;
+/** Только о файле: «A file with this name already exists / doesn't exist»; «A branch called … already exists» сюда не попадает. */
+const FILE_GONE_RE = /^A file with this name (already exists|doesn'?t exist|does not exist)/i;
 
 function errorMessage(body: unknown, fallback: string): string {
   if (body && typeof body === 'object') {
@@ -105,14 +105,16 @@ export class GitLabClient {
   }
 
   /**
-   * Коммит в новую ветку от startSha. «main ушёл вперёд» — kind=conflict: устаревший last_commit_id у update/delete,
+   * Коммит в новую ветку от startBranch. Именно start_branch, а не start_sha: GitLab сверяет last_commit_id с файлами
+   * start_branch, а при start_sha проверку пропускает (start_branch остаётся пустым) — чужая правка перезаписалась бы молча.
+   * «main ушёл вперёд» — kind=conflict: устаревший last_commit_id у update/delete,
    * а также create файла, который уже появился («already exists»), и update/delete уже удалённого («doesn't exist»).
    */
-  async createCommit(p: { branch: string; startSha: string; message: string; actions: CommitAction[] }): Promise<{ id: string }> {
+  async createCommit(p: { branch: string; startBranch: string; message: string; actions: CommitAction[] }): Promise<{ id: string }> {
     try {
       return await this.post(`${this.base}/repository/commits`, {
         branch: p.branch,
-        start_sha: p.startSha,
+        start_branch: p.startBranch,
         commit_message: p.message,
         actions: p.actions,
       });

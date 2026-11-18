@@ -49,21 +49,33 @@ describe('GitLabClient', () => {
     expect(err.kind).toBe('cors-or-network');
   });
 
-  it('createCommit с устаревшим last_commit_id даёт kind=conflict', async () => {
+  it('createCommit шлёт start_branch (не start_sha); устаревший last_commit_id даёт kind=conflict', async () => {
     const c = client();
-    const head = await c.branchHead('main');
     const err = await c
-      .createCommit({ branch: 'arch/x-0001', startSha: head, message: 'm', actions: [{ action: 'update', file_path: 'a.yaml', content: 'k: w\n', last_commit_id: 'stale' }] })
+      .createCommit({ branch: 'arch/x-0001', startBranch: 'main', message: 'm', actions: [{ action: 'update', file_path: 'a.yaml', content: 'k: w\n', last_commit_id: 'stale' }] })
       .catch((e) => e);
     expect(err).toBeInstanceOf(GitLabError);
     expect(err.kind).toBe('conflict');
+    const body = fake.requests.filter((r) => r.method === 'POST' && r.path.endsWith('/repository/commits')).at(-1)!.body as Record<string, unknown>;
+    expect(body).toMatchObject({ branch: 'arch/x-0001', start_branch: 'main' });
+    expect(body).not.toHaveProperty('start_sha');
+  });
+
+  it('фейк как GitLab: с start_sha last_commit_id не проверяется, с start_branch — по текущим файлам ветки', async () => {
+    const head = await client().branchHead('main');
+    const post = (payload: unknown) => fetch(`${fake.url}/api/v4/projects/grp%2Farch/repository/commits`, {
+      method: 'POST', headers: { authorization: `Bearer ${FAKE_TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify(payload),
+    });
+    const upd = [{ action: 'update', file_path: 'a.yaml', content: 'k: s\n', last_commit_id: 'stale' }];
+    expect((await post({ branch: 'arch/sha-0001', start_sha: head, commit_message: 'm', actions: upd })).status).toBe(201);
+    expect((await post({ branch: 'arch/br-0001', start_branch: 'main', commit_message: 'm', actions: upd })).status).toBe(400);
   });
 
   it('createCommit: «файл уже есть / файла нет» — conflict, «ветка уже есть» — other', async () => {
     const reply = (message: string): typeof fetch => async () =>
       new Response(JSON.stringify({ message }), { status: 400, headers: { 'content-type': 'application/json' } });
     const commit = (message: string) => new GitLabClient(cfg, FAKE_TOKEN, reply(message))
-      .createCommit({ branch: 'arch/z-0003', startSha: 'x', message: 'm', actions: [] }).catch((e: GitLabError) => e.kind);
+      .createCommit({ branch: 'arch/z-0003', startBranch: 'main', message: 'm', actions: [] }).catch((e: GitLabError) => e.kind);
     expect(await commit('A file with this name already exists')).toBe('conflict');
     expect(await commit("A file with this name doesn't exist")).toBe('conflict');
     expect(await commit('A file with this name does not exist')).toBe('conflict');
@@ -73,8 +85,7 @@ describe('GitLabClient', () => {
 
   it('createCommit + createMr: коммит в новую ветку и MR', async () => {
     const c = client();
-    const head = await c.branchHead('main');
-    const commit = await c.createCommit({ branch: 'arch/y-0002', startSha: head, message: 'arch: тест', actions: [{ action: 'create', file_path: 'n.txt', content: 'x' }] });
+    const commit = await c.createCommit({ branch: 'arch/y-0002', startBranch: 'main', message: 'arch: тест', actions: [{ action: 'create', file_path: 'n.txt', content: 'x' }] });
     expect(commit.id).toBeTruthy();
     const mr = await c.createMr({ sourceBranch: 'arch/y-0002', title: 'тест', description: 'd', draft: true });
     expect(mr.iid).toBeGreaterThan(0);

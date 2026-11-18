@@ -5,7 +5,7 @@ import { h } from './fields.js';
 import { GitLabError, type GitLabClient } from './gitlab/api.js';
 import type { AppState } from './main.js';
 import type { Validation } from './model.js';
-import { branchName, commitActions, defaultTitle, mrDescription, zipChanges } from './mr.js';
+import { branchName, commitActions, defaultTitle, mrDescription, randomSuffix, zipChanges } from './mr.js';
 import { GraphView } from '../viewer/render.js';
 import { buildView } from '../src/views/index.js';
 import type { Scope, ViewKind } from '../src/views/types.js';
@@ -54,9 +54,22 @@ export function lineDiff(a: string, b: string): DiffLine[] {
   return out;
 }
 
-/** Ошибки (загрузка + проверки уровня error) блокируют MR, предупреждения — нет; пустую корзину не отправить. */
+/**
+ * Файлы корзины, которых нет среди файлов загруженного дерева (team.yaml, product.yaml, services/*): их не читают
+ * ни проверки редактора, ни arch:validate — «Ошибок нет» про них ничего не говорит. Удаления не проверяются.
+ */
+function outsideLayout(v: Validation, changes: Change[]): LoadError[] {
+  if (!v.tree) return []; // дерево не собралось — ошибки загрузки и так блокируют MR
+  const known = new Set(v.tree.teams.flatMap((t) => [t.file, ...t.products.flatMap((p) => [p.file, ...p.services.map((x) => x.file)])]));
+  return changes.filter((c) => c.content !== null && !known.has(c.path)).map((c) => ({
+    file: c.path,
+    message: `Файл ${c.path} лежит вне раскладки модели: его не прочитают ни проверки, ни arch:validate — проверьте имя, код продукта или id команды`,
+  }));
+}
+
+/** Ошибки (загрузка + проверки уровня error + файлы вне раскладки) блокируют MR, предупреждения — нет; пустую корзину не отправить. */
 export function reviewSummary(v: Validation, changes: Change[]): { errors: (Finding | LoadError)[]; warnings: Finding[]; canSubmit: boolean } {
-  const errors: (Finding | LoadError)[] = [...v.loadErrors, ...v.findings.filter((f) => f.level === 'error')];
+  const errors: (Finding | LoadError)[] = [...v.loadErrors, ...outsideLayout(v, changes), ...v.findings.filter((f) => f.level === 'error')];
   const warnings = v.findings.filter((f) => f.level === 'warning');
   return { errors, warnings, canSubmit: errors.length === 0 && changes.length > 0 };
 }
@@ -75,12 +88,12 @@ const movedMessage = (paths: string[]) => (paths.length === 1
   : paths.length ? `Файлы ${paths.join(', ')} изменены в main после загрузки` : 'Файлы корзины изменены в main после загрузки')
   + ' — обновите модель (кнопка «Обновить»), ваши правки сохранены';
 
-/** Какие файлы корзины разошлись с main: last_commit_id на голове ≠ на момент загрузки, новый файл уже есть, файла уже нет. */
-async function movedPaths(client: GitLabClient, changes: Change[], ids: Record<string, string>, head: string): Promise<string[]> {
+/** Какие файлы корзины разошлись с main: last_commit_id на ref ≠ на момент загрузки, новый файл уже есть, файла уже нет. */
+async function movedPaths(client: GitLabClient, changes: Change[], ids: Record<string, string>, ref: string): Promise<string[]> {
   const moved = await Promise.all(changes.map(async (c) => {
     let now: string | null;
     try {
-      now = await client.lastCommitId(c.path, head);
+      now = await client.lastCommitId(c.path, ref);
     } catch (e) {
       if (!(e instanceof GitLabError && e.status === 404)) return false; // не удалось проверить — не утверждаем
       now = null;
@@ -90,15 +103,27 @@ async function movedPaths(client: GitLabClient, changes: Change[], ids: Record<s
   return changes.filter((_, i) => moved[i]).map((c) => c.path);
 }
 
-/**
- * Один коммит в новую ветку и MR. last_commit_id берётся на baseSha (версия, с которой правили), коммит — от текущей
- * головы baseBranch: если файл с тех пор менялся, GitLab отклонит коммит (kind=conflict), ничего не перезаписав.
- * Успех очищает корзину и черновик (в черновике остаются только нерешённые конфликты). Иначе корзина не трогается.
- */
+export const MAIN_MOVED_MESSAGE = 'main обновился — модель перезагружена, проверьте изменения и отправьте снова';
+
+/** Голова baseBranch ушла от baseSha до отправки: ничего не записано, модель нужно перезагрузить (reload в main.ts). */
+export class MainMovedError extends Error {
+  constructor() {
+    super(MAIN_MOVED_MESSAGE);
+    this.name = 'MainMovedError';
+  }
+}
+
 /** Идёт отправка: вторая параллельная создала бы вторую ветку, «Обновить» — подменил бы корзину под cart.clear(). */
 let inFlight = false;
 export const submitting = (): boolean => inFlight;
 
+/**
+ * Один коммит в новую ветку и MR — только если голова baseBranch всё ещё baseSha: проверки шли по baseSha + корзина,
+ * и ровно это попадёт в MR (иначе MainMovedError без записи; паритет с arch:validate в CI).
+ * Коммит — от start_branch=baseBranch с last_commit_id на baseSha: если main сдвинулся между проверкой головы
+ * и коммитом, GitLab сверит last_commit_id с текущими файлами main и отклонит коммит (kind=conflict), ничего не перезаписав.
+ * Успех очищает корзину и черновик (в черновике остаются только нерешённые конфликты). Иначе корзина не трогается.
+ */
 export async function submit(app: AppState, title: string, description: string, rnd: () => string, storage?: Storage): Promise<{ webUrl: string }> {
   if (inFlight) throw new Error('MR уже создаётся — дождитесь окончания');
   inFlight = true;
@@ -117,16 +142,16 @@ async function submitOnce(app: AppState, title: string, description: string, rnd
   const t = title.trim();
   if (!t) throw new Error('Укажите заголовок MR');
 
+  if (await client.branchHead(cfg.baseBranch) !== baseSha) throw new MainMovedError();
   const ids: Record<string, string> = {};
   await Promise.all(changes.filter((c) => c.baseBlobId !== null).map(async (c) => { ids[c.path] = await client.lastCommitId(c.path, baseSha); }));
   const actions = commitActions(changes, ids);
-  const head = await client.branchHead(cfg.baseBranch);
   const branch = branchName(t, rnd);
   try {
-    await client.createCommit({ branch, startSha: head, message: `arch: ${t}`, actions });
+    await client.createCommit({ branch, startBranch: cfg.baseBranch, message: `arch: ${t}`, actions });
   } catch (e) {
     if (e instanceof GitLabError && e.kind === 'conflict') {
-      throw new GitLabError(e.status, 'conflict', movedMessage(await movedPaths(client, changes, ids, head)));
+      throw new GitLabError(e.status, 'conflict', movedMessage(await movedPaths(client, changes, ids, cfg.baseBranch)));
     }
     throw e;
   }
@@ -155,12 +180,15 @@ export interface ReviewHost {
   done(webUrl: string): void;
   /** Ошибка GitLab в общий обработчик (401 → окно «войти снова»). */
   error(e: unknown, what: string): void;
-  reload(): void;
+  /** «Обновить»: модель заново из main; notice — сообщение в шаге «Проверка и MR» после перезагрузки. */
+  reload(notice?: string): void;
+  /** Убрать правку файла из корзины. */
+  remove(path: string): void;
   /** Отправка началась/закончилась (кнопка «Обновить» в шапке недоступна на это время). */
   busy(on: boolean): void;
 }
 
-type Status = { kind: 'err' | 'warn' | 'ok'; msg: (Node | string)[] };
+export type Status = { kind: 'err' | 'warn' | 'ok'; msg: (Node | string)[] };
 /** Последний отрисованный шаг: результат отправки показывается в нём, даже если шаг перерисовали во время запроса. */
 let current: { root: HTMLElement; host: ReviewHost } | null = null;
 
@@ -173,8 +201,6 @@ const CONTEXT = 3;
 let edited: { title?: string; description?: string } = {};
 let view: ViewKind = 'containers';
 let scopeIdx = 0;
-
-const rand4 = () => Array.from(crypto.getRandomValues(new Uint8Array(4)), (b) => 'abcdefghijklmnopqrstuvwxyz0123456789'[b % 36]).join('');
 
 /** Охваты предпросмотра: продукт изменяемого файла; для team.yaml — команда. */
 export function previewScopes(changes: Change[], model: Model): { scope: Scope; label: string }[] {
@@ -202,9 +228,16 @@ export function renderReview(root: HTMLElement, host: ReviewHost, status?: Statu
   root.replaceChildren(
     ...checksBlock(sum, host),
     ...previewBlock(changes, v),
-    ...diffBlock(changes, app.files),
+    ...diffBlock(changes, app.files, host),
     ...mrBlock(changes, v, sum.canSubmit, host, status),
   );
+}
+
+/** Русское множественное число: 1 правка, 2 правки, 5 правок. */
+function plural(n: number, one: string, few: string, many: string): string {
+  const m10 = n % 10;
+  const m100 = n % 100;
+  return m10 === 1 && m100 !== 11 ? one : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? few : many;
 }
 
 function checksBlock(sum: ReturnType<typeof reviewSummary>, host: ReviewHost): Node[] {
@@ -225,8 +258,10 @@ function checksBlock(sum: ReturnType<typeof reviewSummary>, host: ReviewHost): N
   const head = sum.errors.length
     ? h('p', { class: 'msg err', id: 'reviewStatus' }, `Ошибок: ${sum.errors.length} — MR не создаётся, пока они не исправлены. Предупреждений: ${sum.warnings.length}.`)
     : h('p', { class: 'msg ok', id: 'reviewStatus' }, `Ошибок нет. Предупреждений: ${sum.warnings.length}.`);
+  const n = host.app().conflicts.length;
+  const pending = n ? h('p', { class: 'msg warn', id: 'conflictNote' }, `${n} ${plural(n, 'правка черновика ждёт', 'правки черновика ждут', 'правок черновика ждут')} решения и в MR не ${n % 10 === 1 && n % 100 !== 11 ? 'войдёт' : 'войдут'} — см. баннер вверху.`) : null;
   return [
-    h('h3', {}, 'Проверки модели с изменениями'), head,
+    h('h3', {}, 'Проверки модели с изменениями'), head, ...(pending ? [pending] : []),
     h('div', { class: 'findings' }, ...sum.errors.map((f) => row(f, 'error')), ...sum.warnings.map((f) => row(f, 'warning'))),
   ];
 }
@@ -281,7 +316,7 @@ function previewBlock(changes: Change[], v: Validation): Node[] {
   return [title, head, box];
 }
 
-function diffBlock(changes: Change[], files: Record<string, string>): Node[] {
+function diffBlock(changes: Change[], files: Record<string, string>, host: ReviewHost): Node[] {
   const out: Node[] = [h('h3', {}, `Изменённые файлы (${changes.length})`)];
   if (!changes.length) out.push(h('p', { class: 'empty' }, 'Корзина пуста: положите правку в корзину кнопкой «В корзину».'));
   for (const c of changes) {
@@ -308,9 +343,12 @@ function diffBlock(changes: Change[], files: Record<string, string>): Node[] {
       pre.append(h('span', { class: 'skip' }, `… без изменений: ${j - i} стр.`));
       i = j;
     }
+    const drop = h('button', { type: 'button', class: 'ghost', 'data-remove': c.path, disabled: submitting() }, 'Убрать из корзины');
+    drop.addEventListener('click', () => host.remove(c.path));
     out.push(h('details', { class: 'file', open: true },
       h('summary', {}, h('span', { class: `chg ${cls}` }, tag), h('span', {}, c.label), h('code', {}, c.path),
         h('span', { class: 'stat' }, h('span', { class: 'add' }, `+${add}`), ' ', h('span', { class: 'rm' }, `−${del}`))),
+      h('div', { class: 'file-actions' }, drop),
       pre));
   }
   return out;
@@ -354,7 +392,7 @@ function mrBlock(changes: Change[], v: Validation, canSubmit: boolean, host: Rev
     say('warn', 'Создание MR…');
     host.busy(true);
     try {
-      const { webUrl } = await submit(now, title.value, desc.value, rand4, host.storage);
+      const { webUrl } = await submit(now, title.value, desc.value, randomSuffix, host.storage);
       edited = {};
       host.busy(false);
       host.done(webUrl);
@@ -367,6 +405,8 @@ function mrBlock(changes: Change[], v: Validation, canSubmit: boolean, host: Rev
         return host.error(e, 'Создание MR');
       }
       const msg = e instanceof Error ? e.message : String(e);
+      // ничего не записано: перезагрузить модель на новой голове (сверка черновика), сообщение — в шаге после перезагрузки
+      if (e instanceof MainMovedError) return host.reload(msg);
       if (e instanceof GitLabError && e.kind === 'conflict') {
         const r = h('button', { type: 'button', class: 'ghost', id: 'reloadModel' }, 'Обновить');
         r.addEventListener('click', () => host.reload());

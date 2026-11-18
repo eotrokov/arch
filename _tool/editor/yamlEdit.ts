@@ -92,16 +92,18 @@ function deepEqual(a: unknown, b: unknown): boolean {
 
 interface Splice { start: number; end: number; text: string }
 
-export function patchYaml(original: string, next: object): string {
+/** `kind` задаёт порядок ключей для новых ключей; без него — по наличию `code` (продукт) или сервис. */
+export function patchYaml(original: string, next: object, kind?: YamlKind): string {
   const target = next as Obj;
   const src = original === '' || original.endsWith('\n') ? original : original + '\n';
   const doc = parseDocument(src);
   if (doc.errors.length) throw new Error(`YAML не разобран: ${doc.errors[0]!.message}`);
   const map = doc.contents;
   const cur: Obj = isObj(doc.toJS()) ? doc.toJS() : {};
-  const order = 'code' in target || 'code' in cur ? ORDER.product : ORDER.service;
+  const k: YamlKind = kind ?? ('code' in target || 'code' in cur ? 'product' : 'service');
+  const order = ORDER[k];
   const keys = orderedKeys(order, target);
-  if (!isMap(map)) return newYaml('code' in target ? 'product' : 'service', target);
+  if (!isMap(map)) return newYaml(k, target);
 
   const lineEnd = (x: number) => {
     if (x > 0 && src[x - 1] === '\n') return x;

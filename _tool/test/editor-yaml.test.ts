@@ -187,6 +187,13 @@ describe('patchYaml', () => {
     expect(patchYaml('name: a\nsegment: app', { name: 'a', segment: 'app', cluster: 'c' })).toBe('name: a\nsegment: app\ncluster: c\n');
   });
 
+  it('kind задаёт порядок ключей (team), и для файла не-объекта тоже', () => {
+    const data = { links: [{ kind: 'wiki', url: 'https://w' }], owners: [{ role: 'owner', name: 'И.' }], name: 'Продажи' };
+    expect(patchYaml('', data, 'team')).toBe(newYaml('team', data));
+    expect(patchYaml('- x\n', data, 'team')).toBe(newYaml('team', data));
+    expect(patchYaml('name: Продажи\n', data, 'team')).toBe('name: Продажи\nowners:\n  - { role: owner, name: И. }\nlinks:\n  - { kind: wiki, url: https://w }\n');
+  });
+
   it.each(Object.keys(demo).filter((p) => p.endsWith('.yaml')))('is idempotent on demo %s', (p) => {
     const x = file(p);
     expect(patchYaml(x, parse(x))).toBe(x);
