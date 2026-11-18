@@ -40,6 +40,8 @@ describe.skipIf(!hasChrome)('редактор: сценарии в Chrome с ф�
   let fake: FakeGitLab | undefined;
   const errors: string[] = [];
   const external: string[] = [];
+  /** Цели, кроме самой вкладки сценария (воркеры, service worker, всплывающие окна): их запросы page.on('request') не видит. */
+  const targets: string[] = [];
 
   beforeAll(async () => {
     tmp = mkdtempSync(join(tmpdir(), 'arch-e2e-editor-'));
@@ -80,12 +82,15 @@ describe.skipIf(!hasChrome)('редактор: сценарии в Chrome с ф�
   async function setup(online: boolean): Promise<Page> {
     errors.length = 0;
     external.length = 0;
+    targets.length = 0;
     if (online) {
       fake = await startFakeGitLab({ files: demo });
       cfgJson = JSON.stringify({ gitlabUrl: fake.url, projectPath: 'grp/arch', oauthClientId: 'e2e-client', redirectUri: editorUrl, baseBranch: 'main' });
     }
     ctx = await browser.createBrowserContext();
     const page = await ctx.newPage();
+    ctx.on('targetcreated', (t) => targets.push(`${t.type()}: ${t.url()}`));
+    page.on('workercreated', (w) => targets.push(`worker: ${w.url()}`));
     await page.setViewport({ width: 1440, height: 1000 });
     page.on('pageerror', (e) => errors.push(`pageerror: ${(e as Error).message ?? String(e)}`));
     page.on('console', (m) => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) errors.push(`console: ${m.text()}`); });
@@ -171,6 +176,7 @@ describe.skipIf(!hasChrome)('редактор: сценарии в Chrome с ф�
   function clean(): void {
     expect(errors).toEqual([]);
     expect(external).toEqual([]);
+    expect(targets).toEqual([]);
   }
 
   it('1. вход → новый сервис notify2/worker в CRM → MR', async () => {

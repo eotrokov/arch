@@ -14,23 +14,38 @@ const cfg: EditorConfig = {
 };
 
 /**
- * Строки-идентификаторы из библиотек бандла, а не адреса загрузки: $id мета-схем ajv/JSON Schema,
- * пространства имён XML Schema и EMF/ELK в elkjs. Плюс шаблоны и проверки схемы из нашего кода
- * (`https://${…}` для выведенных имён, голые `http://`/`https://` в регулярках).
+ * Строки-идентификаторы из библиотек бандла, а не адреса загрузки — точный список того, что сейчас есть в бандле:
+ * $id мета-схем ajv/JSON Schema, пространства имён XML Schema и EMF/ELK в elkjs. Новая библиотека с новым адресом
+ * уронит тест — тогда адрес нужно проверить и добавить сюда явно.
  */
-const LIBRARY_IDS = [
-  /^http:\/\/json-schema\.org\//,
-  /^https:\/\/raw\.githubusercontent\.com\/ajv-validator\/ajv\/master\/lib\/refs\//,
-  /^http:\/\/www\.w3\.org\/2001\/XMLSchema#/,
-  /^http:\/\/www\.eclipse\.org\/(emf|elk)\//,
-  /^http:\/\/\/org\/eclipse\/emf\//,
-  /^https?:\/\/(\$\{|$)/,
+const LIBRARY_IDS = new Set([
+  'http://json-schema.org/draft-07/schema',
+  'http://json-schema.org/draft-07/schema#',
+  'http://json-schema.org/schema',
+  'https://raw.githubusercontent.com/ajv-validator/ajv/master/lib/refs/data.json#',
+  ...['boolean', 'byte', 'decimal', 'double', 'float', 'hexBinary', 'int', 'integer', 'long', 'short', 'string']
+    .map((t) => `http://www.w3.org/2001/XMLSchema#${t}`),
+  'http://www.eclipse.org/elk/ElkGraph',
+  'http://www.eclipse.org/emf/2002/Ecore',
+  'http://www.eclipse.org/emf/2003/XMLType',
+  'http:///org/eclipse/emf/ecore/util/ExtendedMetaData',
+]);
+/**
+ * Голые `http://`/`https://` допустимы только в этих местах (вырезаются до поиска адресов):
+ * разбор хоста в ajv-formats, подсказка поля URL в мастере, шаблон repoUrl выведенных имён.
+ */
+const LITERAL_CONTEXTS = [
+  /new URL\("http:\/\/"\+/g,
+  /placeholder:"https:\/\/"/g,
+  /repoUrl:`https:\/\/\$\{\w+\}\/\$\{\w+\}\/\$\{\w+\}`/g,
 ];
 const URL_RE = /https?:\/\/[^\s"'`)<>\\]*/g;
 
+/** Адреса в тексте, кроме точных совпадений с cfg и LIBRARY_IDS. */
 function foreignUrls(text: string, allowed: string[]): string[] {
-  return [...new Set(text.match(URL_RE) ?? [])]
-    .filter((u) => !allowed.some((a) => u.startsWith(a)) && !LIBRARY_IDS.some((re) => re.test(u)));
+  let rest = text;
+  for (const re of LITERAL_CONTEXTS) rest = rest.replace(re, '');
+  return [...new Set(rest.match(URL_RE) ?? [])].filter((u) => !allowed.includes(u) && !LIBRARY_IDS.has(u));
 }
 
 describe('buildEditor', () => {
@@ -66,6 +81,16 @@ describe('buildEditor', () => {
     // загрузки по абсолютному адресу и воркеры с сети
     expect(js).not.toMatch(/fetch\(\s*["'`]https?:/);
     expect(js).not.toMatch(/importScripts\(|import\(\s*["'`]https?:/);
+  });
+
+  it('проверка адресов точная: соседний хост, путь под разрешённым хостом и голый https:// вне известных мест ловятся', () => {
+    const allowed = [cfg.gitlabUrl, cfg.redirectUri];
+    expect(foreignUrls(`fetch("${cfg.gitlabUrl}.evil.example/x")`, allowed)).toEqual([`${cfg.gitlabUrl}.evil.example/x`]);
+    expect(foreignUrls('s="https://raw.githubusercontent.com/ajv-validator/ajv/master/lib/refs/cdn.js"', allowed)).toHaveLength(1);
+    expect(foreignUrls('s="http://json-schema.org/evil.js"', allowed)).toHaveLength(1);
+    expect(foreignUrls('s="https://"+host', allowed)).toEqual(['https://']);
+    expect(foreignUrls('u=`https://${h}/x.js`', allowed)).toHaveLength(1);
+    expect(foreignUrls(`placeholder:"https://",repoUrl:\`https://\${a}/\${b}/\${c}\`,new URL("http://"+h),"${cfg.gitlabUrl}"`, allowed)).toEqual([]);
   });
 });
 
