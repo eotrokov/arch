@@ -12,6 +12,8 @@
     "typecheck": "tsc --noEmit",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "arch:validate": "npm run build && node dist/cli.js validate",
+    "spike:build": "node scripts/spike-build.mjs",
+    "spike:serve": "node scripts/spike-serve.mjs",
     "arch:build": "npm run build && node dist/cli.js build"
   },
   "dependencies": {

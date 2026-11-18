@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Проверка редактора arch</title>
+<style>
+  :root { color-scheme: light dark; --bg: #fff; --fg: #1b1f24; --muted: #6b7280; --ok: #1a7f37; --bad: #cf222e; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #14171c; --fg: #e6e8eb; --muted: #9aa3ad; --ok: #3fb950; --bad: #ff7b72; } }
+  body { font: 14px/1.5 system-ui, sans-serif; background: var(--bg); color: var(--fg); margin: 2rem auto; max-width: 52rem; padding: 0 1rem; }
+  button { font: inherit; padding: .4rem .9rem; margin-right: .5rem; }
+  ul { list-style: none; padding: 0; font-family: ui-monospace, monospace; }
+  li.ok { color: var(--ok); } li.bad { color: var(--bad); }
+  .muted { color: var(--muted); }
+</style>
+</head>
+<body>
+<h1>Проверка редактора arch</h1>
+<p class="muted">Проверка OAuth и API GitLab из браузера (CORS, права, создание MR).</p>
+<p>
+  <button type="button" id="login">Войти</button>
+  <button type="button" id="read" disabled>Прочитать модель</button>
+  <button type="button" id="mr" disabled>Создать тестовый MR</button>
+</p>
+<ul id="log" aria-live="polite"></ul>
+<script src="main.js"></script>
+</body>
+</html>
