@@ -1,0 +1,22 @@
+/* Общие CSS-токены и темы просмотрщика и редактора. Шрифты только системные. */
+:root{
+  --bg:#f4f6f9; --panel:#ffffff; --fg:#17202c; --muted:#5b6779; --line:#d8dee8; --frame:#eef2f7;
+  --accent:#1f5fbf; --accent-soft:#e3ecfa;
+  --pdn:#c2265a; --kt:#b86e00; --open:#2f8a4f;
+  --err:#d1262c; --warn:#b86e00; --attn:#c99400;
+  --node:#ffffff; --node-line:#7b879a;
+  --font-ui:system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:ui-monospace,"SF Mono",Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0f141b; --panel:#161d27; --fg:#e4e9f1; --muted:#93a0b3; --line:#2a3444; --frame:#1b2431;
+  --accent:#6ea3ff; --accent-soft:#1d2b44;
+  --pdn:#ff6f9a; --kt:#f0a43a; --open:#5cc884;
+  --err:#ff5a5f; --warn:#f0a43a; --attn:#e8c14a;
+  --node:#1e2734; --node-line:#6c7a8f; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f141b; --panel:#161d27; --fg:#e4e9f1; --muted:#93a0b3; --line:#2a3444; --frame:#1b2431;
+  --accent:#6ea3ff; --accent-soft:#1d2b44;
+  --pdn:#ff6f9a; --kt:#f0a43a; --open:#5cc884;
+  --err:#ff5a5f; --warn:#f0a43a; --attn:#e8c14a;
+  --node:#1e2734; --node-line:#6c7a8f; color-scheme:dark}

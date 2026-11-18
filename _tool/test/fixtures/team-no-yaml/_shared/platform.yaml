@@ -1,0 +1,28 @@
+env: prod
+domain: company.ru
+registry: registry.company.ru
+git: https://gitlab.company.ru
+clusters: [ { id: k8s-prod-1, name: Прод-1 }, { id: k8s-prod-2, name: Прод-2 } ]
+resources:
+  - { id: kafka, kind: kafka, name: Kafka, endpoint: kafka.company.ru, segment: app, port: 9093, protocol: tcp }
+  - { id: ingress, kind: ingress, name: Ingress, endpoint: ingress.company.ru, segment: dmz, port: 443, protocol: https }
+  - { id: s3-main, kind: s3, name: S3 (MinIO), endpoint: s3.company.ru, segment: app, port: 443, protocol: https }
+  - { id: ya-s3, kind: s3, name: Yandex Object Storage, endpoint: storage.yandexcloud.net, segment: external, port: 443, protocol: https }
+  - { id: smtp-relay, kind: smtp, name: Почтовый relay, endpoint: smtp.company.ru, segment: app, port: 587, protocol: smtp }
+  - { id: ya-disk, kind: yandex-disk, name: Яндекс Диск, endpoint: cloud-api.yandex.net, segment: external, port: 443, protocol: https }
+  - { id: ya-messenger, kind: yandex-messenger, name: Яндекс Мессенджер, endpoint: botapi.messenger.yandex.net, segment: external, port: 443, protocol: https }
+  - { id: waf-main, kind: waf, name: WAF, endpoint: waf.company.ru, segment: dmz, port: 443, protocol: https }
+  - { id: adfs, kind: adfs, name: ADFS, endpoint: adfs.company.ru, segment: app, port: 443, protocol: https }
+externals:
+  - { id: bank, name: Банк-партнёр, segment: external, port: 443, protocol: https }
+dbservers:
+  - id: pg-shared
+    engine: postgres
+    version: "16"
+    segment: db
+    port: 5432
+    hosts:
+      - { fqdn: pg-shared-01.db.company.ru, role: primary }
+      - { fqdn: pg-shared-02.db.company.ru, role: replica }
+      - { fqdn: pg-shared-03.db.company.ru, role: replica }
+    owners: [ { role: dba, name: Смирнов В., contact: "@smirnov" } ]

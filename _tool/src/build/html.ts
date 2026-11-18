@@ -8,7 +8,7 @@ import type { Finding, Model } from '../model/types.js';
 export interface HtmlData { model: Model; findings: Finding[]; builtAt: string }
 
 /** Каталог инструмента (с viewer/main.ts): ищем вверх от этого файла — работает и из src/build, и из dist. */
-function toolRoot(): string {
+export function toolRoot(): string {
   let dir = dirname(fileURLToPath(import.meta.url));
   for (;;) {
     if (existsSync(join(dir, 'viewer', 'main.ts'))) return dir;
@@ -43,7 +43,7 @@ async function bundle(root: string): Promise<string> {
 export async function buildHtml(data: HtmlData): Promise<string> {
   const root = toolRoot();
   const js = (await bundle(root)).replace(/<\/script/gi, '<\\/script');
-  const css = readFileSync(join(root, 'viewer', 'styles.css'), 'utf8');
+  const css = ['tokens.css', 'styles.css'].map((f) => readFileSync(join(root, 'viewer', f), 'utf8')).join('\n');
   return `<!doctype html>
 <html lang="ru">
 <head>
