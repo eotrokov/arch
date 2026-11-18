@@ -3,7 +3,7 @@
 import { isSharedPath, saveDraft, type Change } from './cart.js';
 import { h } from './fields.js';
 import { GitLabError, type GitLabClient } from './gitlab/api.js';
-import type { AppState } from './main.js';
+import type { AppState } from './state.js';
 import type { Validation } from './model.js';
 import { branchName, commitActions, defaultTitle, mrDescription, randomSuffix, zipChanges } from './mr.js';
 import { GraphView } from '../viewer/render.js';
