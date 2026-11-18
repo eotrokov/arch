@@ -8,6 +8,10 @@ import { Cart, applyCart, isSharedPath, loadDraft, reconcile, saveDraft, type Ch
 import { deleteChange, startEdit, startNew, toChange, type WizardKind, type WizardState } from './forms.js';
 import { h } from './fields.js';
 import { Wizard } from './wizard.js';
+import { doneView, renderReview, type ReviewHost } from './review.js';
+import type { Finding } from '../src/model/types.js';
+import type { LoadError } from '../src/model/raw.js';
+import { stepOfFinding } from './forms.js';
 import { platformNames, type PlatformNames } from '../src/model/names.js';
 
 export interface Deps { fetch: typeof fetch; storage: Storage; session: Storage; location: Location }
@@ -44,6 +48,8 @@ let doc: Document;
 let deps: Deps;
 let app: AppState;
 let wizard: Wizard | null = null;
+/** Шаг «Проверка и MR» открыт без мастера (кнопкой счётчика корзины). */
+let standalone = false;
 let timer: ReturnType<typeof setTimeout> | undefined;
 /** Последние непустые списки для полей: при ошибке схемы в правке дерево не строится, а списки нужны. */
 let lists: { picks: PickLists; platform: PlatformNames } = { picks: pickLists(EMPTY), platform: { env: 'prod', domain: '', registry: '', git: '' } };
@@ -286,20 +292,29 @@ function cartChanged(): void {
   renderAll();
 }
 
-function toCart(): void {
-  const st = app.wizard!;
+/** Текущая правка мастера → корзина; null — правку построить нельзя (тост с причиной). */
+function putCurrent(): Change | null {
   const { change, error } = currentChange();
-  if (!change) return toast(error ?? 'Правку нельзя положить в корзину', 'err');
+  if (!change) { toast(error ?? 'Правку нельзя положить в корзину', 'err'); return null; }
   try {
     if (app.cartPath && app.cartPath !== change.path) app.cart.remove(app.cartPath);
     if (change.content === app.files[change.path]) app.cart.remove(change.path); // вернули как в main — правки нет
     else app.cart.put(change);
   } catch (e) {
-    return toast(e instanceof Error ? e.message : String(e), 'err');
+    toast(e instanceof Error ? e.message : String(e), 'err');
+    return null;
   }
-  const step = app.step;
-  toast(`В корзине: ${change.label}`);
+  app.cartPath = app.cart.changes().some((c) => c.path === change.path) ? change.path : undefined;
   cartChanged();
+  return change;
+}
+
+function toCart(): void {
+  const st = app.wizard!;
+  const step = app.step;
+  const change = putCurrent();
+  if (!change) return;
+  toast(`В корзине: ${change.label}`);
   open(st.kind, change.path, step);
 }
 
@@ -331,6 +346,7 @@ function create(kind: WizardKind, team = '', product?: string): void {
 }
 
 function showWizard(st: WizardState, step: string): void {
+  standalone = false;
   app.wizard = st;
   app.step = step;
   revalidate();
@@ -343,6 +359,7 @@ function showWizard(st: WizardState, step: string): void {
     stepChanged: (s) => { app.step = s; },
     toCart,
     close: closeWizard,
+    review: (el) => renderReview(el, reviewHost()),
   }, step);
   wizard.render();
   renderTree();
@@ -356,13 +373,73 @@ function closeWizard(): void {
   renderAll();
 }
 
+// ---- проверка и MR ----
+
+function reviewHost(): ReviewHost {
+  return {
+    app: () => app,
+    changes: () => pendingChanges().filter((c) => c.content !== app.files[c.path]),
+    openFinding,
+    flush: () => !app.wizard || putCurrent() !== null,
+    storage: deps.storage,
+    done: mrCreated,
+    error: handleError,
+    reload: () => void reload(),
+  };
+}
+
+function openFinding(f: Finding | LoadError): void {
+  const path = f.file!;
+  const kind = kindOf(path);
+  const step = stepOfFinding(kind, f, path) ?? 'main';
+  if (app.wizard && (app.cartPath ?? app.wizard.path) === path && wizard) return wizard.go(step);
+  standalone = false;
+  open(kind, path, step);
+}
+
+function openReview(): void {
+  if (wizard) return wizard.go('review');
+  standalone = true;
+  renderAll();
+}
+
+function mrCreated(webUrl: string): void {
+  app.wizard = undefined;
+  app.cartPath = undefined;
+  wizard = null;
+  standalone = false;
+  revalidate();
+  renderAll();
+  $('wizard').replaceChildren(doneView(webUrl));
+  toast('MR создан');
+  app.client?.openMrs(app.user!.username).then((mrs) => { app.openMrs = mrs; renderBanners(); }, (e) => handleError(e, 'Открытые MR'));
+}
+
+/** «Обновить»: модель заново из main; черновик сверяется с новым main (изменённые там файлы — в баннер конфликтов). */
+async function reload(): Promise<void> {
+  if (app.mode !== 'gitlab' || !app.client) return;
+  persist();
+  app.cart.clear();
+  app.conflicts = [];
+  app.wizard = undefined;
+  app.cartPath = undefined;
+  wizard = null;
+  standalone = false;
+  await loadFromGitLab();
+}
+
 // ---- отрисовка ----
 
 function renderAll(): void {
   renderHeader();
   renderBanners();
   renderTree();
-  if (!wizard) {
+  if (!wizard && standalone) {
+    const close = btn('Закрыть', 'ghost', () => { standalone = false; renderAll(); });
+    const box = h('div', { class: 'review', id: 'review' });
+    $('wizard').replaceChildren(h('div', { class: 'wiz-head' }, h('h2', {}, 'Проверка и MR'), h('span', { class: 'sp' }), close), box);
+    renderReview(box, reviewHost());
+  } else if (!wizard) {
     $('wizard').replaceChildren(h('div', { class: 'intro' },
       h('h2', {}, 'Выберите элемент слева'),
       h('p', { class: 'empty' }, 'Откройте сервис, продукт или команду, чтобы изменить их, или создайте новый кнопками «+ команда», «+ продукт», «+ сервис». Изменения копятся в корзине до создания MR.')));
@@ -374,7 +451,9 @@ function renderHeader(): void {
   const cnt = $('cartCount');
   cnt.hidden = false;
   cnt.textContent = `Изменений: ${n}`;
+  cnt.title = 'Проверка и MR';
   cnt.classList.toggle('on', n > 0);
+  $('reload').hidden = app.mode !== 'gitlab';
   const u = $('user');
   u.hidden = !app.user;
   u.textContent = app.user ? `${app.user.name} · @${app.user.username}` : '';
@@ -481,6 +560,8 @@ export async function boot(d: Document, dp: Deps): Promise<void> {
   doc = d;
   deps = dp;
   const cfg = await loadConfig(dp.fetch, 'config.json');
+  $('cartCount').addEventListener('click', () => { if (doc.body.dataset.state === 'ready') openReview(); });
+  $('reload').addEventListener('click', () => void reload());
   app = {
     mode: cfg ? 'gitlab' : 'offline', cfg: cfg ?? undefined, files: {}, blobs: {}, dirs: [],
     validation: EMPTY, cart: new Cart(), conflicts: [], step: 'main', openMrs: [],

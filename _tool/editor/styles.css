@@ -105,6 +105,37 @@ p.hint{margin:0}
 .placeholder h3{margin-top:0}
 .wiz-nav{display:flex;flex-wrap:wrap;gap:8px;align-items:center;border-top:1px solid var(--line);margin-top:16px;padding-top:12px}
 
+/* шаг «Проверка и MR» */
+button.tag{background:none;cursor:pointer}
+button.tag:hover{border-color:var(--accent)}
+.msg.ok{color:var(--open)}
+.findings .find{grid-template-columns:auto auto minmax(0,1fr) auto}
+.ffile{display:block;font:11px var(--font-mono);color:var(--muted);overflow-wrap:anywhere}
+.prev-head{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;margin-bottom:8px}
+.prev-head select{width:auto;max-width:100%}
+.tabs{display:flex;flex-wrap:wrap;gap:2px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:3px}
+.tabs button{font-size:13px;border:0;background:none;color:var(--muted);padding:5px 10px;border-radius:6px}
+.tabs button[aria-selected="true"]{background:var(--accent-soft);color:var(--accent);font-weight:600}
+.preview{position:relative;height:min(440px,60vh);border:1px solid var(--line);border-radius:8px;background:var(--bg);overflow:hidden}
+.preview .cy{position:absolute;inset:0}
+.preview .empty.center{position:absolute;inset:0;margin:auto;height:fit-content}
+details.file{border:1px solid var(--line);border-radius:8px;margin:6px 0;min-width:0}
+details.file summary{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;padding:7px 10px;cursor:pointer;font-size:13px}
+details.file summary code{color:var(--muted);overflow-wrap:anywhere}
+details.file .chg{margin-left:0}
+.stat{margin-left:auto;font:12px var(--font-mono)}
+.stat .add,.diff .add{color:var(--open)} .stat .rm,.diff .rm{color:var(--err)}
+.diff{margin:0;padding:8px 10px;border-top:1px solid var(--line);font:12px/1.5 var(--font-mono);overflow:auto;max-height:420px;white-space:pre}
+.diff span{display:block}
+.diff .add{background:color-mix(in srgb,var(--open) 12%,transparent)}
+.diff .rm{background:color-mix(in srgb,var(--err) 12%,transparent)}
+.diff .ctx{color:var(--muted)}
+.diff .skip{color:var(--muted);font-style:italic;background:var(--frame)}
+.review .fld{margin:8px 0}
+.review textarea.in{font:12px/1.5 var(--font-mono);resize:vertical}
+.mr-actions{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;margin-top:10px}
+.done a{overflow-wrap:anywhere}
+
 /* тост и модальное окно */
 .toast{position:fixed;right:16px;bottom:16px;max-width:min(480px,calc(100vw - 32px));background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--open);border-radius:8px;padding:10px 14px;font-size:13px;box-shadow:0 4px 16px rgb(0 0 0 / .15);z-index:20}
 .toast.warn{border-left-color:var(--warn)} .toast.err{border-left-color:var(--err)}

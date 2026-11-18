@@ -19,6 +19,8 @@ export interface WizardHost {
   stepChanged(step: string): void;
   toCart(): void;
   close(): void;
+  /** Заполнить шаг «Проверка и MR» (контейнер уже в документе). */
+  review(el: HTMLElement): void;
 }
 
 type Item = { f: Finding | LoadError; level: Finding['level'] };
@@ -91,6 +93,8 @@ export class Wizard {
       this.els.names, this.els.find,
       h('div', { class: 'wiz-nav' }, back, next, h('span', { class: 'sp' }), cart),
     );
+    const review = this.root.querySelector<HTMLElement>('#review');
+    if (review) this.host.review(review);
     this.refresh();
   }
 
@@ -118,7 +122,7 @@ export class Wizard {
     this.root.querySelector('#wizPath')!.textContent = path ?? '';
     this.els.err.hidden = !error;
     this.els.err.textContent = error ?? '';
-    const mine = byStep.get(this.step) ?? [];
+    const mine = this.step === 'review' ? [] : byStep.get(this.step) ?? []; // на «Проверке» — полная сводка шага
     this.els.find.replaceChildren(...(mine.length ? [h('h3', {}, 'Ошибки и предупреждения шага'), ...mine.map(findingRow)] : []));
     this.els.names.replaceChildren(...this.names());
   }
@@ -141,7 +145,7 @@ export class Wizard {
   private fields(): Node[] {
     const k = this.state.kind;
     const s = this.step;
-    if (s === 'review') return reviewPlaceholder();
+    if (s === 'review') return [h('div', { class: 'review', id: 'review' })];
     if (s === 'people') return this.people();
     if (k === 'service') {
       if (s === 'main') return this.serviceMain();
@@ -420,13 +424,6 @@ export class Wizard {
       ]),
     ].filter((n): n is HTMLElement => n !== null);
   }
-}
-
-function reviewPlaceholder(): Node[] {
-  return [h('div', { class: 'placeholder' },
-    h('h3', {}, 'Проверка и MR'),
-    h('p', {}, 'Сводка проверок, изменённые файлы и создание MR появятся на этом шаге.'),
-    h('p', { class: 'empty' }, 'Пока: положите правку в корзину — счётчик изменений в шапке.'))];
 }
 
 function findingRow(it: Item): HTMLElement {

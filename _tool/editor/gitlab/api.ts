@@ -19,6 +19,7 @@ export class GitLabError extends Error {
 }
 
 const CHANGED_RE = /changed since|has changed|last_commit_id|was changed/i;
+const FILE_GONE_RE = /already exists|doesn'?t exist|does not exist/i;
 
 function errorMessage(body: unknown, fallback: string): string {
   if (body && typeof body === 'object') {
@@ -102,13 +103,24 @@ export class GitLabClient {
     return res.text();
   }
 
-  createCommit(p: { branch: string; startSha: string; message: string; actions: CommitAction[] }): Promise<{ id: string }> {
-    return this.post(`${this.base}/repository/commits`, {
-      branch: p.branch,
-      start_sha: p.startSha,
-      commit_message: p.message,
-      actions: p.actions,
-    });
+  /**
+   * Коммит в новую ветку от startSha. «main ушёл вперёд» — kind=conflict: устаревший last_commit_id у update/delete,
+   * а также create файла, который уже появился («already exists»), и update/delete уже удалённого («doesn't exist»).
+   */
+  async createCommit(p: { branch: string; startSha: string; message: string; actions: CommitAction[] }): Promise<{ id: string }> {
+    try {
+      return await this.post(`${this.base}/repository/commits`, {
+        branch: p.branch,
+        start_sha: p.startSha,
+        commit_message: p.message,
+        actions: p.actions,
+      });
+    } catch (e) {
+      if (e instanceof GitLabError && e.kind === 'other' && e.status === 400 && FILE_GONE_RE.test(e.message)) {
+        throw new GitLabError(e.status, 'conflict', e.message);
+      }
+      throw e;
+    }
   }
 
   async createMr(p: { sourceBranch: string; title: string; description: string; draft?: boolean }): Promise<{ iid: number; webUrl: string }> {

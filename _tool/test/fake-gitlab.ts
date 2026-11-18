@@ -10,6 +10,8 @@ export interface FakeGitLab {
   url: string;
   requests: FakeRequest[];
   setFile(path: string, content: string): void;
+  /** Удаляет файл в main отдельным коммитом. */
+  deleteFile(path: string): void;
   close(): Promise<void>;
 }
 
@@ -206,6 +208,13 @@ export async function startFakeGitLab(opts: { files: Record<string, string>; por
       const main = branches.get('main')!;
       const id = nextId();
       main.files.set(path, { content, commit: id });
+      main.head = id;
+      history.set(id, new Map(main.files));
+    },
+    deleteFile(path) {
+      const main = branches.get('main')!;
+      const id = nextId();
+      main.files.delete(path);
       main.head = id;
       history.set(id, new Map(main.files));
     },
