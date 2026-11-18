@@ -27,7 +27,7 @@ async function bundle(root: string): Promise<string> {
   const res = await build({
     entryPoints: [join(root, 'viewer', 'main.ts')],
     bundle: true, format: 'iife', minify: true, platform: 'browser', target: 'es2020',
-    write: false, legalComments: 'none', logLevel: 'silent',
+    absWorkingDir: root, write: false, legalComments: 'none', logLevel: 'silent',
     // основной вход elkjs тянет web-worker; для браузера — самодостаточная сборка
     alias: { elkjs: 'elkjs/lib/elk.bundled.js' },
   });

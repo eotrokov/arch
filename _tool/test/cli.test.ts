@@ -2,6 +2,8 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { resolve } from 'node:path';
 import { run } from '../src/cli.js';
 import { generate } from '../scripts/gen-synthetic.js';
 
@@ -29,6 +31,25 @@ describe('cli', () => {
     expect(JSON.parse(m![1]!.replace(/<\\\//g, '</')).model.nodes['crm-orders']).toBeDefined();
     expect(r.stdout).toMatch(/Ошибок: 0, предупреждений: \d+/);
   });
+
+  it('build does not depend on cwd', async () => {
+    const demo = resolve('examples/demo');
+    const out = join(tmp, 'cwd');
+    const prev = process.cwd();
+    process.chdir(tmp);
+    try {
+      expect((await exec(['build', '--root', demo, '--out', out])).code).toBe(0);
+    } finally { process.chdir(prev); }
+    expect(existsSync(join(out, 'index.html'))).toBe(true);
+  });
+
+  it('compiled dist/cli.js builds from another cwd', () => {
+    const pkg = process.cwd();
+    execFileSync('npm', ['run', 'build'], { cwd: pkg, stdio: 'pipe' });
+    const out = join(tmp, 'dist-out');
+    execFileSync('node', [join(pkg, 'dist/cli.js'), 'build', '--root', join(pkg, 'examples/demo'), '--out', out], { cwd: tmp, stdio: 'pipe' });
+    expect(existsSync(join(out, 'index.html'))).toBe(true);
+  }, 60_000);
 
   it('build empty model', async () => {
     const out = join(tmp, 'empty');

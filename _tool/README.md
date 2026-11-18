@@ -44,7 +44,7 @@ arch/
 cd _tool
 npm ci
 npm run arch:validate [-- --root <каталог>]
-npm run arch:build    [-- --root <каталог>] [-- --out <каталог>]
+npm run arch:build    [-- --root <каталог> --out <каталог>]
 ```
 
 - `--root` — корень модели, по умолчанию `arch/` (каталог на уровень выше `_tool`).
