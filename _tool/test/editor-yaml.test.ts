@@ -138,6 +138,41 @@ describe('patchYaml', () => {
     });
   });
 
+  it('fills an empty value (`key:`) with a separating space', () => {
+    const src = 'name: a\ncluster:\nport:\n';
+    const out = patchYaml(src, { name: 'a', cluster: 'x', port: 8080 });
+    expect(out).toBe('name: a\ncluster: x\nport: 8080\n');
+    expect(patchYaml('cluster:', { cluster: 'x' })).toBe('cluster: x\n');
+  });
+
+  it('fills an empty value followed by a comment without merging them', () => {
+    const out = patchYaml('name: a\ncluster: # todo\nport: 1\n', { name: 'a', cluster: 'x', port: 1 });
+    expect(out).toBe('name: a\ncluster: x # todo\nport: 1\n');
+    expect(parse(out).cluster).toBe('x');
+  });
+
+  it('a changed block map stays block; diff is limited to the changed line', () => {
+    const src = 'code: crm\nname: CRM\nnfr:\n  slo: 99.9%\n  rto: 1h\nowners: [ { role: owner, name: X } ]\n';
+    const out = patchYaml(src, { ...parse(src), nfr: { slo: '99.95%', rto: '1h' } });
+    expect(lineDiff(src, out)).toEqual({ removed: ['  slo: 99.9%'], added: ['  slo: 99.95%'] });
+    const ov = 'name: a\noverrides:\n  port: { value: 1, reason: r }\n  tls:\n    value: true\n    reason: x\n';
+    const next = { ...parse(ov), overrides: { port: { value: 2, reason: 'r' }, tls: { value: true, reason: 'x' } } };
+    expect(lineDiff(ov, patchYaml(ov, next))).toEqual({ removed: ['  port: { value: 1, reason: r }', '  tls:', '    value: true', '    reason: x'], added: ['  port: { value: 2, reason: r }', '  tls: { value: true, reason: x }'] });
+  });
+
+  it('a changed block scalar is replaced with a valid value', () => {
+    const src = 'name: a\nnote: |\n  line1\n  line2\nport: 1\n';
+    const out = patchYaml(src, { name: 'a', note: 'другой\nтекст', port: 1 });
+    expect(parse(out)).toEqual({ name: 'a', note: 'другой\nтекст', port: 1 });
+    expect(lineDiff(src, out).removed).toEqual(['note: |', '  line1', '  line2']);
+  });
+
+  it('guard: throws instead of returning a file that does not parse to next', () => {
+    // Псевдоним: правка `a` через якорь изменила бы и `b`.
+    const src = 'a: &x 1\nb: *x\n';
+    expect(() => patchYaml(src, { a: 2, b: 1 })).toThrow(/ключ «b»/);
+  });
+
   it('new keys are inserted in canonical position', () => {
     const src = file('sales/crm/services/notify-worker.yaml');
     const next = { ...parse(src), port: 8081, owners: [{ role: 'techlead', name: 'X' }], criticality: 'low' };

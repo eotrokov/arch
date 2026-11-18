@@ -50,9 +50,9 @@ function flow(v: unknown): string {
   return scalar(v);
 }
 
-/** Пара `key: value` с отступом `indent`; `seqIndent` — отступать ли `- ` под ключом. */
-function pair(key: string, v: unknown, indent: string, seqIndent: boolean): string {
-  if (flowable(v)) return `${indent}${key}: ${flow(v)}\n`;
+/** Пара `key: value` с отступом `indent`; `seqIndent` — отступать ли `- ` под ключом; `block` — объект писать в block. */
+function pair(key: string, v: unknown, indent: string, seqIndent: boolean, block = false): string {
+  if (!(block && isObj(v) && entries(v).length) && flowable(v)) return `${indent}${key}: ${flow(v)}\n`;
   if (Array.isArray(v)) {
     const dash = indent + (seqIndent ? '  ' : '');
     return `${indent}${key}:\n` + v.map((x) => item(x, dash, seqIndent)).join('');
@@ -129,12 +129,16 @@ export function patchYaml(original: string, next: object): string {
     }
     const keyText = src.slice(p.key.range[0], p.key.range[1]);
     if (isScalar(v) && !isObj(want) && !Array.isArray(want) && !String(v.type).startsWith('BLOCK')) {
-      splices.push({ start: v.range![0], end: v.range![1], text: scalar(want, v.type) });
+      // Пустое значение (`key:`): диапазон пуст и стоит сразу после `:` или перед комментарием.
+      const [r0, r1] = v.range!;
+      const pre = src[r0 - 1] === ':' ? ' ' : '';
+      const post = r0 === r1 && src[r1] === '#' ? ' ' : '';
+      splices.push({ start: r0, end: r1, text: pre + scalar(want, v.type) + post });
     } else if (isCollection(v) && v.flow) {
       splices.push({ start, end, text: `${keyText}: ${flow(want)}${src.slice(v.range![1], end)}` });
     } else {
       const seqIndent = isSeq(v) ? v.range![0] - lineStart(v.range![0]) > start - lineStart(start) : true;
-      splices.push({ start, end, text: pair(keyText, want, '', seqIndent) });
+      splices.push({ start, end, text: pair(keyText, want, '', seqIndent, isMap(v)) });
     }
   }
 
@@ -153,7 +157,22 @@ export function patchYaml(original: string, next: object): string {
   splices.sort((a, b) => b.start - a.start || (b.end - b.start) - (a.end - a.start));
   let out = src;
   for (const s of splices) out = out.slice(0, s.start) + s.text + out.slice(s.end);
+  checkResult(out, cur, target);
   return out;
+}
+
+/** Результат обязан разбираться ровно в `next` (с учётом нетронутых пустых списков), иначе файл не пишется. */
+function checkResult(out: string, cur: Obj, target: Obj): void {
+  const doc = parseDocument(out);
+  const got: Obj = doc.errors.length ? {} : (doc.toJS() as Obj) ?? {};
+  const want: Obj = {};
+  for (const k of Object.keys(target)) {
+    if (deepEqual(cur[k], target[k])) want[k] = cur[k];
+    else if (keep(target[k])) want[k] = target[k];
+  }
+  if (doc.errors.length) throw new Error(`Правка YAML дала некорректный файл: ${doc.errors[0]!.message}`);
+  const bad = [...new Set([...Object.keys(want), ...Object.keys(got)])].find((k) => !deepEqual(got[k], want[k]));
+  if (bad !== undefined) throw new Error(`Правка YAML исказила ключ «${bad}»: файл не изменён`);
 }
 
 export function servicePath(team: string, code: string, name: string, type: string): string {
