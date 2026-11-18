@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Cart, applyCart, saveDraft, loadDraft, reconcile, type Change } from '../editor/cart.js';
+import { Cart, isSharedPath, applyCart, saveDraft, loadDraft, reconcile, type Change } from '../editor/cart.js';
 
 class FakeStorage implements Storage {
   private m = new Map<string, string>();
@@ -88,5 +88,38 @@ describe('reconcile', () => {
     const r = reconcile([same, moved, gone, clash, fresh], blobs);
     expect(r.applied).toEqual([same, fresh]);
     expect(r.conflicts).toEqual([moved, gone, clash]);
+  });
+});
+
+describe('_shared path normalisation', () => {
+  const forms = ['_shared', '_shared/x', './_shared/x', '/_shared/x', 'a/../_shared/x', '\\_shared\\x', 'a//../_shared/./x'];
+  it.each(forms)('%s is shared', (p) => {
+    expect(isSharedPath(p)).toBe(true);
+    expect(() => new Cart().put(ch(p, 'a', null))).toThrow('Файлы _shared меняют архитекторы');
+    expect(() => applyCart({}, [ch(p, 'a', null)])).toThrow('_shared');
+    expect(() => reconcile([ch(p, 'a', null)], {})).toThrow('_shared');
+  });
+  it('non-shared look-alikes pass', () => {
+    for (const p of ['_shared2/x', 'a/_shared/x', 'sales/../crm/x.yaml']) expect(isSharedPath(p)).toBe(false);
+  });
+  it('loadDraft drops loose _shared forms', () => {
+    const s = new FakeStorage();
+    s.setItem('arch-editor:draft:p', JSON.stringify(forms.map((p) => ch(p, 'a', null))));
+    expect(loadDraft(s, 'p')).toEqual([]);
+  });
+});
+
+describe('storage failures', () => {
+  const boom = new FakeStorage();
+  boom.getItem = () => { throw new Error('SecurityError'); };
+  boom.setItem = () => { throw new Error('QuotaExceededError'); };
+  boom.removeItem = () => { throw new Error('SecurityError'); };
+  it('saveDraft returns false instead of throwing; true on success', () => {
+    expect(saveDraft(boom, 'p', [ch('a', 'A', null)])).toBe(false);
+    expect(saveDraft(boom, 'p', [])).toBe(false);
+    expect(saveDraft(new FakeStorage(), 'p', [ch('a', 'A', null)])).toBe(true);
+  });
+  it('loadDraft returns [] when getItem throws', () => {
+    expect(loadDraft(boom, 'p')).toEqual([]);
   });
 });

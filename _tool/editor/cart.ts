@@ -11,6 +11,19 @@ export interface Change {
   label: string;
 }
 
+/** Нормализует путь (\\ → /, убирает ./, ведущий /, сворачивает . и ..) и проверяет принадлежность _shared. */
+export function isSharedPath(p: string): boolean {
+  const parts: string[] = [];
+  for (const seg of p.replace(/\\/g, '/').split('/')) {
+    if (seg === '' || seg === '.') continue;
+    if (seg === '..') parts.pop();
+    else parts.push(seg);
+  }
+  return parts[0] === '_shared';
+}
+
+const SHARED_ERROR = 'Файлы _shared меняют архитекторы';
+
 export class Cart {
   private items = new Map<string, Change>();
 
@@ -19,7 +32,7 @@ export class Cart {
   }
 
   put(c: Change): void {
-    if (c.path.startsWith('_shared/')) throw new Error('Файлы _shared меняют архитекторы');
+    if (isSharedPath(c.path)) throw new Error(SHARED_ERROR);
     this.items.set(c.path, c);
   }
 
@@ -39,6 +52,7 @@ export class Cart {
 export function applyCart(files: FileMap, changes: Change[]): FileMap {
   const out: FileMap = { ...files };
   for (const c of changes) {
+    if (isSharedPath(c.path)) throw new Error(SHARED_ERROR);
     if (c.content === null) delete out[c.path];
     else out[c.path] = c.content;
   }
@@ -47,9 +61,15 @@ export function applyCart(files: FileMap, changes: Change[]): FileMap {
 
 const draftKey = (projectPath: string) => `arch-editor:draft:${projectPath}`;
 
-export function saveDraft(storage: Storage, projectPath: string, changes: Change[]): void {
-  if (changes.length === 0) storage.removeItem(draftKey(projectPath));
-  else storage.setItem(draftKey(projectPath), JSON.stringify(changes));
+/** true = сохранено; false = хранилище недоступно или переполнено. */
+export function saveDraft(storage: Storage, projectPath: string, changes: Change[]): boolean {
+  try {
+    if (changes.length === 0) storage.removeItem(draftKey(projectPath));
+    else storage.setItem(draftKey(projectPath), JSON.stringify(changes));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function isChange(v: unknown): v is Change {
@@ -57,7 +77,7 @@ function isChange(v: unknown): v is Change {
   const c = v as Record<string, unknown>;
   return (
     typeof c.path === 'string' &&
-    !c.path.startsWith('_shared/') &&
+    !isSharedPath(c.path) &&
     (c.content === null || typeof c.content === 'string') &&
     (c.baseBlobId === null || typeof c.baseBlobId === 'string') &&
     typeof c.label === 'string'
@@ -65,9 +85,9 @@ function isChange(v: unknown): v is Change {
 }
 
 export function loadDraft(storage: Storage, projectPath: string): Change[] {
-  const raw = storage.getItem(draftKey(projectPath));
-  if (raw === null) return [];
   try {
+    const raw = storage.getItem(draftKey(projectPath));
+    if (raw === null) return [];
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed.filter(isChange).map((c) => ({ path: c.path, content: c.content, baseBlobId: c.baseBlobId, label: c.label }));
@@ -80,6 +100,7 @@ export function reconcile(changes: Change[], blobs: Record<string, string>): { a
   const applied: Change[] = [];
   const conflicts: Change[] = [];
   for (const c of changes) {
+    if (isSharedPath(c.path)) throw new Error(SHARED_ERROR);
     const current = blobs[c.path];
     const conflict = c.baseBlobId === null ? current !== undefined : current !== c.baseBlobId;
     (conflict ? conflicts : applied).push(c);
