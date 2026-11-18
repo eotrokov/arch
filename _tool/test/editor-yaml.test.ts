@@ -1,10 +1,17 @@
 import { describe, it, expect } from 'vitest';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { parse } from 'yaml';
 import { readModel } from '../src/model/load.js';
 import { newYaml, patchYaml, servicePath, productPath, teamPath } from '../editor/yamlEdit.js';
 
 const demo = readModel('examples/demo').files;
 const file = (p: string) => demo[p]!;
+const fixtures: Record<string, string> = Object.fromEntries(
+  readdirSync('test/fixtures', { recursive: true, encoding: 'utf8' })
+    .filter((p) => p.endsWith('.yaml'))
+    .map((p) => [p, readFileSync(join('test/fixtures', p), 'utf8')]),
+);
 
 const SERVICE_ORDER = ['name', 'type', 'segment', 'cluster', 'criticality', 'port', 'protocol', 'databases', 'publishes', 'consumes', 'calls', 'uses', 'exports', 'exposure', 'owners', 'links', 'overrides'];
 const PRODUCT_ORDER = ['code', 'name', 'criticality', 'nfr', 'owners', 'links', 'entities', 'externals', 'dbservers', 'resources'];
@@ -157,14 +164,14 @@ describe('patchYaml', () => {
     expect(lineDiff(src, out)).toEqual({ removed: ['  slo: 99.9%'], added: ['  slo: 99.95%'] });
     const ov = 'name: a\noverrides:\n  port: { value: 1, reason: r }\n  tls:\n    value: true\n    reason: x\n';
     const next = { ...parse(ov), overrides: { port: { value: 2, reason: 'r' }, tls: { value: true, reason: 'x' } } };
-    expect(lineDiff(ov, patchYaml(ov, next))).toEqual({ removed: ['  port: { value: 1, reason: r }', '  tls:', '    value: true', '    reason: x'], added: ['  port: { value: 2, reason: r }', '  tls: { value: true, reason: x }'] });
+    expect(lineDiff(ov, patchYaml(ov, next))).toEqual({ removed: ['  port: { value: 1, reason: r }'], added: ['  port: { value: 2, reason: r }'] });
   });
 
   it('a changed block scalar is replaced with a valid value', () => {
     const src = 'name: a\nnote: |\n  line1\n  line2\nport: 1\n';
     const out = patchYaml(src, { name: 'a', note: 'другой\nтекст', port: 1 });
     expect(parse(out)).toEqual({ name: 'a', note: 'другой\nтекст', port: 1 });
-    expect(lineDiff(src, out).removed).toEqual(['note: |', '  line1', '  line2']);
+    expect(lineDiff(src, out)).toEqual({ removed: ['note: |', '  line1', '  line2'], added: ['note: |-', '  другой', '  текст'] });
   });
 
   it('guard: throws instead of returning a file that does not parse to next', () => {
@@ -192,6 +199,161 @@ describe('patchYaml', () => {
     expect(patchYaml('', data, 'team')).toBe(newYaml('team', data));
     expect(patchYaml('- x\n', data, 'team')).toBe(newYaml('team', data));
     expect(patchYaml('name: Продажи\n', data, 'team')).toBe('name: Продажи\nowners:\n  - { role: owner, name: И. }\nlinks:\n  - { kind: wiki, url: https://w }\n');
+  });
+
+  describe('точечная правка внутри блоков', () => {
+    const product = [
+      'code: crm',
+      'name: CRM',
+      'nfr: # почему так',
+      '  # доступность',
+      '  slo: 99.9%',
+      '  rto: 1h # согласовано',
+      '  # хвост',
+      'owners: [ { role: owner, name: X } ]',
+      '',
+    ].join('\n');
+
+    it('скаляр во вложенном блочном map: 1 строка, комментарии на месте', () => {
+      const next = parse(product);
+      next.nfr.slo = '99.95%';
+      const out = patchYaml(product, next);
+      expect(lineDiff(product, out)).toEqual({ removed: ['  slo: 99.9%'], added: ['  slo: 99.95%'] });
+      expect(parse(out)).toEqual(next);
+    });
+
+    it('новый и удалённый ключ во вложенном map — только их строки', () => {
+      const next = parse(product);
+      delete next.nfr.rto;
+      next.nfr.rpo = '15m';
+      const out = patchYaml(product, next);
+      expect(lineDiff(product, out)).toEqual({ removed: ['  rto: 1h # согласовано'], added: ['  rpo: 15m'] });
+      expect(out).toContain('nfr: # почему так\n  # доступность\n');
+    });
+
+    it('map в map: блочный стиль сохранён', () => {
+      const ov = 'name: a\noverrides:\n  # порт\n  port: { value: 1, reason: r }\n  tls:\n    value: true # да\n    reason: x\n';
+      const next = parse(ov);
+      next.overrides.tls.value = false;
+      const out = patchYaml(ov, next);
+      expect(lineDiff(ov, out)).toEqual({ removed: ['    value: true # да'], added: ['    value: false # да'] });
+    });
+
+    const svc = [
+      'name: orders',
+      'uses:',
+      '  # шина',
+      '  - { resource: kafka }',
+      '  # файлы',
+      '  - { resource: s3-main, bucket: files, access: rw } # вложения',
+      '  # токены',
+      '  - { resource: adfs, purpose: "Проверка токенов" }',
+      'links: [ { kind: api, url: https://x } ]',
+      '',
+    ].join('\n');
+
+    it('элемент списка правится точечно, комментарии между элементами на месте', () => {
+      const next = parse(svc);
+      next.uses[1].access = 'ro';
+      const out = patchYaml(svc, next);
+      expect(lineDiff(svc, out)).toEqual({
+        removed: ['  - { resource: s3-main, bucket: files, access: rw } # вложения'],
+        added: ['  - { resource: s3-main, bucket: files, access: ro } # вложения'],
+      });
+    });
+
+    it('добавление в конец списка — только новые строки', () => {
+      const next = parse(svc);
+      next.uses.push({ resource: 'redis' });
+      const out = patchYaml(svc, next);
+      expect(lineDiff(svc, out)).toEqual({ removed: [], added: ['  - { resource: redis }'] });
+      expect(parse(out)).toEqual(next);
+    });
+
+    it('удаление из середины — его строки и его комментарий', () => {
+      const next = parse(svc);
+      next.uses.splice(1, 1);
+      const out = patchYaml(svc, next);
+      expect(lineDiff(svc, out)).toEqual({ removed: ['  # файлы', '  - { resource: s3-main, bucket: files, access: rw } # вложения'], added: [] });
+    });
+
+    it('добавление в начало и в середину списка', () => {
+      const next = parse(svc);
+      next.uses.splice(1, 0, { resource: 'redis' });
+      next.uses.unshift({ resource: 'pg' });
+      const out = patchYaml(svc, next);
+      expect(lineDiff(svc, out)).toEqual({ removed: [], added: ['  - { resource: pg }', '  - { resource: redis }'] });
+      expect(parse(out)).toEqual(next);
+    });
+
+    it('последовательность с отступом 4: отступ сохраняется', () => {
+      const src = 'name: a\nuses:\n    - { resource: kafka }\n    - { resource: s3, access: rw }\n';
+      const next = parse(src);
+      next.uses[1].access = 'ro';
+      next.uses.push({ resource: 'redis' });
+      const out = patchYaml(src, next);
+      expect(lineDiff(src, out)).toEqual({ removed: ['    - { resource: s3, access: rw }'], added: ['    - { resource: s3, access: ro }', '    - { resource: redis }'] });
+    });
+
+    it('блочный элемент списка: правка вложенного ключа и добавление нового', () => {
+      const src = file('sales/crm/product.yaml');
+      const next = parse(src);
+      next.dbservers[0].port = 6432;
+      next.dbservers[0].hosts.push({ fqdn: 'pg-crm-03.db.company.ru', role: 'replica' });
+      const out = patchYaml(src, next);
+      expect(lineDiff(src, out)).toEqual({ removed: ['    port: 5432'], added: ['    port: 6432', '      - { fqdn: pg-crm-03.db.company.ru, role: replica }'] });
+    });
+
+    it('блочный скаляр | : стиль сохранён, меняются только строки текста', () => {
+      const src = 'name: a\ndescription: |\n  Строка 1\n  Строка 2\nport: 1\n';
+      const next = { ...parse(src), description: 'Строка 1\nСтрока два\n' };
+      const out = patchYaml(src, next);
+      expect(lineDiff(src, out)).toEqual({ removed: ['  Строка 2'], added: ['  Строка два'] });
+      expect(parse(out)).toEqual(next);
+      const folded = 'name: a\nnote: >\n    один\n    два\nport: 1\n';
+      const nf = { ...parse(folded), note: 'три\n' };
+      const of = patchYaml(folded, nf);
+      expect(lineDiff(folded, of)).toEqual({ removed: ['    один', '    два'], added: ['    три'] });
+      expect(parse(of)).toEqual(nf);
+    });
+
+    it('CRLF: замена, вставка, удаление — только \\r\\n', () => {
+      const src = 'name: a\r\nsegment: app\r\nuses:\r\n  - { resource: kafka }\r\n  - { resource: s3 }\r\nexports: [ { channel: cdc, target: dwh } ]\r\n';
+      const { exports: _x, ...base } = parse(src);
+      const next = { ...base, segment: 'dmz', cluster: 'c1', uses: [{ resource: 'kafka' }, { resource: 's3' }, { resource: 'redis' }] };
+      const out = patchYaml(src, next);
+      expect(parse(out)).toEqual(next);
+      expect(out.replace(/\r\n/g, '')).not.toContain('\n');
+      expect(out).toBe('name: a\r\nsegment: dmz\r\ncluster: c1\r\nuses:\r\n  - { resource: kafka }\r\n  - { resource: s3 }\r\n  - { resource: redis }\r\n');
+      expect(patchYaml(src, parse(src))).toBe(src);
+    });
+
+    it('удаление ключа вместе с комментарием-строкой над ним', () => {
+      const src = 'name: a\n# кластер временный\ncluster: c1\nport: 1\n';
+      expect(patchYaml(src, { name: 'a', port: 1 })).toBe('name: a\nport: 1\n');
+      const nested = 'name: a\nnfr:\n  slo: 1\n  # убрать\n  rto: 2\n';
+      expect(patchYaml(nested, { name: 'a', nfr: { slo: 1 } })).toBe('name: a\nnfr:\n  slo: 1\n');
+    });
+
+    it('защита: правка рядом с псевдонимом точечна, правка якоря — ошибка (откат на замену целиком тоже не проходит)', () => {
+      const src = 'name: a\nbase: &b\n  x: 1\nother:\n  <<: *b\n  y: 2\n';
+      const next = JSON.parse(JSON.stringify(parse(src)));
+      next.other.y = 3;
+      const out = patchYaml(src, next);
+      expect(lineDiff(src, out)).toEqual({ removed: ['  y: 2'], added: ['  y: 3'] });
+      expect(parse(out)).toEqual(next);
+      const next2 = JSON.parse(JSON.stringify(parse(src)));
+      next2.base.x = 5;
+      expect(() => patchYaml(src, next2)).toThrow(/Правка YAML/);
+    });
+  });
+
+  it.each(Object.keys(fixtures).filter((p) => p.endsWith('.yaml')))('is idempotent on fixture %s', (p) => {
+    const x = fixtures[p]!;
+    let data: unknown;
+    try { data = parse(x); } catch { return; }
+    if (typeof data !== 'object' || data === null || Array.isArray(data)) return;
+    expect(patchYaml(x, data)).toBe(x);
   });
 
   it.each(Object.keys(demo).filter((p) => p.endsWith('.yaml')))('is idempotent on demo %s', (p) => {
