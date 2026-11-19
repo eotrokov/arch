@@ -267,8 +267,11 @@ describeChrome('редактор: сценарии в Chrome с фальшивы
 
     // (а) в main изменён другой файл: коммита нет, модель перезагружена, правка применена заново
     fake!.setFile('sales/pay/services/billing.yaml', `${demo['sales/pay/services/billing.yaml']}# чужая правка\n`);
+    await page.$eval('#mrTitle', (el) => { (el as HTMLInputElement).value = 'Мой заголовок'; el.dispatchEvent(new Event('input', { bubbles: true })); });
     await page.click('#createMr');
     await moved(page);
+    // правленый заголовок переживает автоматическую перезагрузку: пользователю его же и отправлять заново
+    expect(await page.$eval('#mrTitle', (el) => (el as HTMLInputElement).value)).toBe('Мой заголовок');
     expect(await text(page, '#mrStatus')).toContain('модель перезагружена, проверьте изменения и отправьте снова');
     expect(commits()).toEqual([]);
     expect(await text(page, '#cartCount')).toBe('Изменений: 1');

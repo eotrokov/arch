@@ -199,7 +199,7 @@ const CONTEXT = 3;
 
 /** Правленые вручную заголовок и описание живут между перерисовками шага (до успешной отправки). */
 let edited: { title?: string; description?: string } = {};
-/** Сброс правок заголовка/описания: после «Обновить» (корзина очищена) и после создания MR. */
+/** Сброс правок заголовка/описания: после «Обновить» пользователя, при пустой корзине и после создания MR. */
 export function resetReviewEdits(): void { edited = {}; }
 /** Граф предпросмотра прошлой отрисовки: при новой его cytoscape уничтожается, иначе утекает. */
 let previewGraph: GraphView | null = null;
@@ -363,6 +363,7 @@ function diffBlock(changes: Change[], files: Record<string, string>, host: Revie
 function mrBlock(changes: Change[], v: Validation, canSubmit: boolean, host: ReviewHost, initial?: Status): Node[] {
   const app = host.app();
   const offline = app.mode !== 'gitlab';
+  if (!changes.length) resetReviewEdits(); // другой набор правок — другой MR: прежний заголовок не переносится
   const title = h('input', { class: 'in', id: 'mrTitle', 'aria-label': 'Заголовок' });
   title.value = edited.title ?? defaultTitle(changes);
   title.addEventListener('input', () => { edited.title = title.value; });

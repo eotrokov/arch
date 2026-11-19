@@ -3,7 +3,7 @@
 import { loadConfig } from './config.js';
 import { GitLabError } from './gitlab/api.js';
 import { pickLists, validateFiles, type PickLists, type Validation } from './model.js';
-import { Cart, applyCart, isSharedPath, loadDraft, reconcile, saveDraft, type Change } from './cart.js';
+import { Cart, applyCart, saveDraft, type Change } from './cart.js';
 import { deleteChange, nameError, startEdit, startNew, toChange, type WizardKind, type WizardState } from './forms.js';
 import { h } from './fields.js';
 import { Wizard } from './wizard.js';
@@ -36,7 +36,6 @@ let standalone = false;
 let timer: ReturnType<typeof setTimeout> | undefined;
 /** Последние непустые списки для полей: при ошибке схемы в правке дерево не строится, а списки нужны. */
 let lists: { picks: PickLists; platform: PlatformNames } = { picks: pickLists(EMPTY), platform: { env: 'prod', domain: '', registry: '', git: '' } };
-
 
 const $ = (id: string) => byId(doc, id);
 const projectKey = () => projectKeyOf(app, deps.location);
@@ -284,7 +283,8 @@ async function reload(notice?: string): Promise<void> {
     if (!built && !doc.defaultView?.confirm('Несохранённые поля мастера будут потеряны. Обновить модель?')) return;
   }
   persist();
-  app.cart.clear(); resetReviewEdits();
+  app.cart.clear();
+  if (notice === undefined) resetReviewEdits(); // правки заголовка/описания сбрасывает только «Обновить» пользователя, не автоперезагрузка при сдвиге main
   app.conflicts = [];
   app.wizard = undefined;
   app.cartPath = undefined;

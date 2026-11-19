@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { CHROME, describeChrome } from './chrome.js';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -11,7 +11,6 @@ import { runChecks } from '../../src/checks/index.js';
 import { buildHtml } from '../../src/build/html.js';
 import { toHash } from '../../viewer/state.js';
 import type { Scope, ViewKind } from '../../src/views/types.js';
-
 
 const VIEWS: ViewKind[] = ['kubernetes', 'containers', 'firewall', 'databases', 'dataflows'];
 const SCOPES: Scope[] = [
