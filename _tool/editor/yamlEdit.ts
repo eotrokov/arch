@@ -3,11 +3,16 @@
 //
 // Новые файлы: канонический порядок ключей, списки — block, их элементы —
 // flow `{ ... }`, если внутри нет вложенных объектов (как в демо-модели).
-// Правка: parseDocument даёт узлы и их позиции в исходном тексте; меняются
-// только изменившиеся ключи верхнего уровня, остальной текст (комментарии,
-// порядок, стиль, отступы) остаётся байт-в-байт.
+// Правка: parseDocument даёт узлы и их позиции в исходном тексте; правка
+// рекурсивна: в блочных map — по ключам, в блочных списках — по сопоставленным
+// элементам, скаляры (и блочные `|`/`>`) — по своему диапазону, flow-коллекции —
+// целиком. Остальной текст (комментарии, порядок, стиль, отступы) остаётся
+// байт-в-байт; новые строки — в стиле соседей, CRLF-файл остаётся CRLF.
+// Если результат не прошёл проверку, изменённые значения верхнего уровня
+// заменяются целиком; не прошёл и тогда — ошибка, файл не меняется.
 
-import { Document, isMap, isScalar, isSeq, isCollection, parseDocument, Scalar } from 'yaml';
+import { Document, isMap, isScalar, isSeq, isCollection, parseDocument, Scalar, visit } from 'yaml';
+import type { Pair, YAMLMap, YAMLSeq } from 'yaml';
 
 export type YamlKind = 'service' | 'product' | 'team';
 
@@ -91,82 +96,301 @@ function deepEqual(a: unknown, b: unknown): boolean {
 }
 
 interface Splice { start: number; end: number; text: string }
+type Edits = Splice[] | null;
+
+/** Текст и позиционные помощники; `fine` — точечная правка внутри блоков (иначе — замена значения целиком). */
+class Src {
+  constructor(readonly text: string, readonly fine: boolean, readonly seqIndent: boolean) {}
+  lineStart(x: number): number { return this.text.lastIndexOf('\n', x - 1) + 1; }
+  lineEnd(x: number): number {
+    if (x > 0 && this.text[x - 1] === '\n') return x;
+    const nl = this.text.indexOf('\n', x);
+    return nl < 0 ? this.text.length : nl + 1;
+  }
+  col(x: number): number { return x - this.lineStart(x); }
+  /**
+   * Начало собственных комментариев ключа/элемента, строка которого начинается в `ls`: подряд идущие
+   * строки-комментарии с отступом `col` прямо над ней. Блок, начинающий файл (шапка) или стоящий
+   * после пустой строки (заголовок раздела), — не собственный: тогда `ls`.
+   */
+  commentsAbove(ls: number, col: number): number {
+    let top = ls;
+    while (top > 0) {
+      const prev = this.lineStart(top - 1);
+      const line = this.text.slice(prev, top - 1);
+      if (line.trimStart().startsWith('#') && line.length - line.trimStart().length === col) top = prev;
+      else break;
+    }
+    if (top === ls) return ls;
+    if (top === 0 || !this.text.slice(this.lineStart(top - 1), top - 1).trim()) return ls;
+    return top;
+  }
+  /** Комментарий в строке ключа после значения (или после `:`, если значение на следующих строках). */
+  keyLineComment(p: Pair): string {
+    const k = rng(p.key)!;
+    const le = this.lineEnd(k[1]);
+    const r = rng(p.value);
+    let from = k[1];
+    if (r && r[0] < le) {
+      if (r[1] > le) return '';
+      from = r[1];
+    }
+    return /(?:^|\s)(#.*)$/.exec(this.text.slice(from, le).replace(/\n$/, ''))?.[1] ?? '';
+  }
+  /** Перед позицией `x` в её строке только пробелы (и `- `, если `dash`). */
+  lineLead(x: number, dash = false): boolean {
+    return (dash ? /^ *- +$/ : /^ *$/).test(this.text.slice(this.lineStart(x), x));
+  }
+}
+
+const rng = (n: unknown) => (n as { range?: [number, number, number] } | null)?.range;
+const isBlock = (n: unknown) => isCollection(n) && !n.flow;
+
+/** Конец пары: строка, где кончается значение (без хвостовых комментариев-строк). */
+function pairEnd(s: Src, p: Pair): number {
+  const r = rng(p.value);
+  return s.lineEnd(r ? r[1] : rng(p.key)![2]);
+}
+
+/** Правки, превращающие значение-узел `node` (сейчас `cur`) в `want`; null — точечно нельзя. */
+function patchNode(s: Src, node: unknown, cur: unknown, want: unknown): Edits {
+  if (deepEqual(cur, want)) return [];
+  const r = rng(node);
+  if (!r) return null;
+  const wantCol = Array.isArray(want) || isObj(want);
+  if (isScalar(node)) {
+    if (wantCol) return null;
+    if (String(node.type).startsWith('BLOCK')) return typeof want === 'string' ? blockScalar(s, node, want) : null;
+    // Пустое значение (`key:`): диапазон пуст и стоит сразу после `:` или перед комментарием.
+    const pre = s.text[r[0] - 1] === ':' ? ' ' : '';
+    const post = r[0] === r[1] && s.text[r[1]] === '#' ? ' ' : '';
+    return [{ start: r[0], end: r[1], text: pre + scalar(want, node.type) + post }];
+  }
+  if (!isCollection(node) || !wantCol) return null;
+  if (node.flow) return [{ start: r[0], end: r[1], text: flow(want) }];
+  if (!s.fine) return null;
+  if (isMap(node) && isObj(want) && entries(want).length && isObj(cur)) return patchMap(s, node, cur, want);
+  if (isSeq(node) && Array.isArray(want) && want.length && Array.isArray(cur)) return patchSeq(s, node, cur, want);
+  return null;
+}
+
+/** Блочный скаляр `|`/`>`: заголовок остаётся, если не изменился индикатор; текст — с прежним отступом. */
+function blockScalar(s: Src, node: Scalar, want: string): Edits {
+  const [r0, r1] = rng(node)!;
+  const n = new Scalar(want);
+  n.type = node.type;
+  const lines = new Document({ k: n }).toString({ lineWidth: 0 }).split('\n');
+  const head = lines[0]!.slice(3);
+  const body = lines.slice(1, -1);
+  const bodyStart = s.lineEnd(r0);
+  const first = s.text.slice(bodyStart, r1).split('\n').find((l) => l.trim());
+  const oldHead = /^[|>][-+0-9]*/.exec(s.text.slice(r0))?.[0];
+  if (!/^[|>][-+]?$/.test(head) || first === undefined || !oldHead) return null;
+  const ind = ' '.repeat(first.length - first.trimStart().length);
+  const text = body.map((l) => (l ? ind + l.slice(2) : l) + '\n').join('');
+  const out: Splice[] = [{ start: bodyStart, end: r1, text }];
+  if (head !== oldHead) out.push({ start: r0, end: r0 + oldHead.length, text: head });
+  return out;
+}
+
+/** Пара целиком заново (в стиле исходного значения), начиная с ключа. */
+function replacePair(s: Src, p: Pair, want: unknown): Splice {
+  const k = rng(p.key)!;
+  const v = p.value;
+  const ind = ' '.repeat(s.col(k[0]));
+  const seqIndent = isSeq(v) && !v.flow ? s.col(rng(v)![0]) > s.col(k[0]) : s.seqIndent;
+  let text = pair(s.text.slice(k[0], k[1]), want, ind, seqIndent, isMap(v)).slice(ind.length);
+  const comment = s.keyLineComment(p);
+  if (comment) text = text.replace('\n', ` ${comment}\n`);
+  return { start: k[0], end: pairEnd(s, p), text };
+}
+
+function patchMap(s: Src, map: YAMLMap, cur: Obj, want: Obj): Edits {
+  const out: Splice[] = [];
+  let col = -1, last = -1;
+  for (const p of map.items) {
+    if (!isScalar(p.key) || !rng(p.key)) return null;
+    const key = String(p.key.value);
+    const k0 = rng(p.key)![0];
+    if (col < 0) col = s.col(k0);
+    last = pairEnd(s, p);
+    if (want[key] === undefined) {
+      if (!s.lineLead(k0)) return null;
+      out.push({ start: s.commentsAbove(s.lineStart(k0), col), end: last, text: '' });
+      continue;
+    }
+    out.push(...(patchNode(s, p.value, cur[key], want[key]) ?? [replacePair(s, p, want[key])]));
+  }
+  if (col < 0) return null;
+  const add = entries(want).filter(([k]) => !(k in cur));
+  if (add.length) out.push({ start: last, end: last, text: add.map(([k, v]) => pair(scalar(k), v, ' '.repeat(col), s.seqIndent)).join('') });
+  return out;
+}
+
+/** Сопоставление элементов (LCS по равенству): пары [i, j] совпавших элементов. */
+function matchItems(a: unknown[], b: unknown[]): [number, number][] {
+  const n = a.length, m = b.length;
+  const t = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) t[i]![j] = deepEqual(a[i], b[j]) ? t[i + 1]![j + 1]! + 1 : Math.max(t[i + 1]![j]!, t[i]![j + 1]!);
+  const out: [number, number][] = [];
+  for (let i = 0, j = 0; i < n && j < m;) {
+    if (deepEqual(a[i], b[j])) out.push([i++, j++]);
+    else if (t[i + 1]![j]! >= t[i]![j + 1]!) i++;
+    else j++;
+  }
+  return out;
+}
+
+function patchSeq(s: Src, seq: YAMLSeq, cur: unknown[], want: unknown[]): Edits {
+  const items = seq.items;
+  if (items.length !== cur.length || !items.length) return null;
+  const starts: number[] = [];
+  for (const it of items) {
+    const r = rng(it);
+    if (!r || !s.lineLead(r[0], true)) return null;
+    starts.push(s.lineStart(r[0]));
+  }
+  const dashCol = s.text.indexOf('-', starts[0]!) - starts[0]!;
+  const end = (i: number) => s.lineEnd(rng(items[i])![1]);
+  const out: Splice[] = [];
+  const gap = (i0: number, i1: number, j0: number, j1: number) => {
+    let i = i0, j = j0;
+    for (; i < i1 && j < j1; i++, j++) {
+      out.push(...(patchNode(s, items[i], cur[i], want[j]) ?? [{ start: starts[i]!, end: end(i), text: item(want[j], ' '.repeat(dashCol), s.seqIndent) }]));
+    }
+    for (; i < i1; i++) out.push({ start: s.commentsAbove(starts[i]!, dashCol), end: end(i), text: '' });
+    if (j < j1) {
+      const at = i1 > 0 ? end(i1 - 1) : s.commentsAbove(starts[0]!, dashCol);
+      out.push({ start: at, end: at, text: want.slice(j, j1).map((x) => item(x, ' '.repeat(dashCol), s.seqIndent)).join('') });
+    }
+  };
+  let pi = 0, pj = 0;
+  for (const [i, j] of matchItems(cur, want)) {
+    gap(pi, i, pj, j);
+    pi = i + 1;
+    pj = j + 1;
+  }
+  gap(pi, cur.length, pj, want.length);
+  return out;
+}
+
+/** Стиль списков файла: отступает ли `- ` под ключом (по первому блочному списку). */
+function detectSeqIndent(text: string, map: YAMLMap): boolean {
+  const s = new Src(text, false, true);
+  let found: boolean | undefined;
+  visit(map, {
+    Pair(_, p) {
+      if (found === undefined && isSeq(p.value) && !p.value.flow && rng(p.key) && rng(p.value)) {
+        found = s.col(rng(p.value)![0]) > s.col(rng(p.key)![0]);
+        return visit.BREAK;
+      }
+    },
+  });
+  return found ?? true;
+}
 
 /** `kind` задаёт порядок ключей для новых ключей; без него — по наличию `code` (продукт) или сервис. */
 export function patchYaml(original: string, next: object, kind?: YamlKind): string {
+  return patchYamlDetailed(original, next, kind).text;
+}
+
+export interface PatchResult {
+  text: string;
+  /** Результат получен точечной правкой (без отката на замену изменённых значений целиком). */
+  fine: boolean;
+  /** Почему точечная правка не прошла (тогда сработал откат). */
+  fineError?: string;
+}
+
+/** То же, что `patchYaml`, с признаком пути правки (для тестов и диагностики). */
+export function patchYamlDetailed(original: string, next: object, kind?: YamlKind): PatchResult {
+  // Файл целиком в CRLF правится как LF и возвращается в CRLF.
+  const crlf = original.includes('\r\n') && !/(^|[^\r])\n/.test(original);
+  const text = crlf ? original.replace(/\r\n/g, '\n') : original;
   const target = next as Obj;
-  const src = original === '' || original.endsWith('\n') ? original : original + '\n';
+  const src = text === '' || text.endsWith('\n') ? text : text + '\n';
   const doc = parseDocument(src);
   if (doc.errors.length) throw new Error(`YAML не разобран: ${doc.errors[0]!.message}`);
   const map = doc.contents;
   const cur: Obj = isObj(doc.toJS()) ? doc.toJS() : {};
   const k: YamlKind = kind ?? ('code' in target || 'code' in cur ? 'product' : 'service');
+  const eol = (x: string) => (crlf ? x.replace(/\n/g, '\r\n') : x);
+  if (!isMap(map)) return { text: eol(newYaml(k, target)), fine: true };
+
+  const seqIndent = detectSeqIndent(src, map);
+  let out: string | undefined;
+  let fineError: string | undefined;
+  try {
+    out = splice(new Src(src, true, seqIndent), map, cur, target, k);
+    if (out !== undefined) checkResult(out, cur, target);
+  } catch (e) {
+    // Точечная правка не прошла проверку — замена изменённых значений целиком.
+    fineError = e instanceof Error ? e.message : String(e);
+    out = splice(new Src(src, false, seqIndent), map, cur, target, k);
+    if (out !== undefined) checkResult(out, cur, target);
+  }
+  return { text: out === undefined ? original : eol(out), fine: fineError === undefined, fineError };
+}
+
+/** Правки верхнего уровня (порядок новых ключей — канонический) и их применение; undefined — изменений нет. */
+function splice(s: Src, map: YAMLMap, cur: Obj, target: Obj, k: YamlKind): string | undefined {
   const order = ORDER[k];
-  const keys = orderedKeys(order, target);
-  if (!isMap(map)) return newYaml(k, target);
-
-  const lineEnd = (x: number) => {
-    if (x > 0 && src[x - 1] === '\n') return x;
-    const nl = src.indexOf('\n', x);
-    return nl < 0 ? src.length : nl + 1;
-  };
-  const lineStart = (x: number) => src.lastIndexOf('\n', x - 1) + 1;
-
   const splices: Splice[] = [];
   const ends = new Map<string, number>();
-  let firstStart = src.length;
+  let firstStart = s.text.length;
   for (const p of map.items) {
     if (!isScalar(p.key) || !p.key.range) continue;
     const key = String(p.key.value);
-    const v = p.value;
     const start = p.key.range[0];
-    const end = lineEnd(isScalar(v) || isCollection(v) ? v.range![2] : p.key.range[2]);
+    const r = rng(p.value);
+    const end = s.lineEnd(r ? r[2] : p.key.range[2]);
     ends.set(key, end);
     firstStart = Math.min(firstStart, start);
     const want = target[key];
     if (deepEqual(cur[key], want)) continue;
-    if (!keep(want)) {
-      splices.push({ start, end, text: '' });
-      continue;
-    }
-    const keyText = src.slice(p.key.range[0], p.key.range[1]);
-    if (isScalar(v) && !isObj(want) && !Array.isArray(want) && !String(v.type).startsWith('BLOCK')) {
-      // Пустое значение (`key:`): диапазон пуст и стоит сразу после `:` или перед комментарием.
-      const [r0, r1] = v.range!;
-      const pre = src[r0 - 1] === ':' ? ' ' : '';
-      const post = r0 === r1 && src[r1] === '#' ? ' ' : '';
-      splices.push({ start: r0, end: r1, text: pre + scalar(want, v.type) + post });
-    } else if (isCollection(v) && v.flow) {
-      splices.push({ start, end, text: `${keyText}: ${flow(want)}${src.slice(v.range![1], end)}` });
-    } else {
-      const seqIndent = isSeq(v) ? v.range![0] - lineStart(v.range![0]) > start - lineStart(start) : true;
-      splices.push({ start, end, text: pair(keyText, want, '', seqIndent, isMap(v)) });
-    }
+    if (!keep(want)) splices.push({ start: s.commentsAbove(s.lineStart(start), 0), end, text: '' });
+    else splices.push(...(patchNode(s, p.value, cur[key], want) ?? [replacePair(s, p, want)]));
   }
 
   const inserts = new Map<number, string>();
-  for (const key of keys) {
+  for (const key of orderedKeys(order, target)) {
     if (key in cur) continue;
     const at = order.indexOf(key);
-    const anchor = at < 0 ? undefined : order.slice(0, at).reverse().find((k) => ends.has(k));
-    const pos = at < 0 ? src.length : anchor ? ends.get(anchor)! : firstStart;
+    const anchor = at < 0 ? undefined : order.slice(0, at).reverse().find((x) => ends.has(x));
+    const pos = at < 0 ? s.text.length : anchor ? ends.get(anchor)! : firstStart;
     inserts.set(pos, (inserts.get(pos) ?? '') + pair(scalar(key), target[key], '', true));
   }
   for (const [pos, text] of inserts) splices.push({ start: pos, end: pos, text });
 
-  if (!splices.length) return original;
-  // С конца к началу; при равном начале сначала замена, затем вставка перед ней.
-  splices.sort((a, b) => b.start - a.start || (b.end - b.start) - (a.end - a.start));
-  let out = src;
-  for (const s of splices) out = out.slice(0, s.start) + s.text + out.slice(s.end);
-  checkResult(out, cur, target);
+  if (!splices.length) return undefined;
+  // С конца к началу; при равном начале сначала замена, затем вставка перед ней. Вставки в одной
+  // позиции — в порядке добавления (вложенные раньше внешних): позже добавленная применяется первой,
+  // а каждая следующая встаёт перед ней.
+  const queue = splices.map((sp, i) => ({ sp, i }));
+  queue.sort((a, b) => b.sp.start - a.sp.start || (b.sp.end - b.sp.start) - (a.sp.end - a.sp.start) || b.i - a.i);
+  let out = s.text;
+  let limit = Infinity;
+  for (const { sp } of queue) {
+    // Пересекающиеся удаления (комментарий над ключом в хвосте предыдущего значения) сливаются.
+    if (sp.end > limit) {
+      if (sp.text) throw new Error('Правка YAML: пересекающиеся правки');
+      sp.end = limit;
+    }
+    out = out.slice(0, sp.start) + sp.text + out.slice(sp.end);
+    limit = sp.start;
+  }
   return out;
 }
 
 /** Результат обязан разбираться ровно в `next` (с учётом нетронутых пустых списков), иначе файл не пишется. */
 function checkResult(out: string, cur: Obj, target: Obj): void {
   const doc = parseDocument(out);
-  const got: Obj = doc.errors.length ? {} : (doc.toJS() as Obj) ?? {};
+  let got: Obj = {};
+  try {
+    if (!doc.errors.length) got = (doc.toJS() as Obj) ?? {};
+  } catch (e) {
+    throw new Error(`Правка YAML дала некорректный файл: ${(e as Error).message}`);
+  }
   const want: Obj = {};
   for (const k of Object.keys(target)) {
     if (deepEqual(cur[k], target[k])) want[k] = cur[k];

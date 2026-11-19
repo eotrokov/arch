@@ -6,7 +6,7 @@ import type { EditorConfig } from '../editor/config.js';
 import { Cart, applyCart, loadDraft, reconcile, saveDraft, type Change } from '../editor/cart.js';
 import { validateFiles } from '../editor/model.js';
 import type { Validation } from '../editor/model.js';
-import type { AppState } from '../editor/main.js';
+import type { AppState } from '../editor/state.js';
 import type { Finding } from '../src/model/types.js';
 import { MAIN_MOVED_MESSAGE, MainMovedError, lineDiff, reviewSummary, submit, submitting } from '../editor/review.js';
 import { FAKE_TOKEN, startFakeGitLab, type FakeGitLab } from './fake-gitlab.js';

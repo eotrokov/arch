@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { CHROME, describeChrome } from './chrome.js';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -10,10 +11,6 @@ import { runChecks } from '../../src/checks/index.js';
 import { buildHtml } from '../../src/build/html.js';
 import { toHash } from '../../viewer/state.js';
 import type { Scope, ViewKind } from '../../src/views/types.js';
-
-const CHROME = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const hasChrome = existsSync(CHROME);
-if (!hasChrome) console.warn(`[e2e] Chrome не найден (${CHROME}): смоук-тест пропущен. Укажите CHROME_PATH.`);
 
 const VIEWS: ViewKind[] = ['kubernetes', 'containers', 'firewall', 'databases', 'dataflows'];
 const SCOPES: Scope[] = [
@@ -31,7 +28,7 @@ const scopeKey = (s: Scope) => (s.kind === 'company' ? 'company' : `${s.kind}:${
  */
 const EMPTY = new Set(['kubernetes|company', 'databases|company', 'databases|service:crm-orders-ui', 'dataflows|service:crm-orders-ui']);
 
-describe.skipIf(!hasChrome)(`viewer smoke (headless Chrome: ${CHROME})`, () => {
+describeChrome(`viewer smoke (headless Chrome: ${CHROME})`, () => {
   let dir: string;
   let html: string;
   let url: string;

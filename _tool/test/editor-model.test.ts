@@ -28,6 +28,20 @@ describe('validateFiles', () => {
   });
 });
 
+describe('pickLists: запасной путь без модели', () => {
+  it('учитывает overrides сервиса в id', () => {
+    const files = { ...demo.files };
+    delete files['sales/pay/services/billing.yaml']; // ссылка в orders.yaml ломается: модели нет, дерево есть
+    files['sales/crm/services/orders.yaml'] += 'overrides:\n  id: { value: crm-orders-custom, reason: test }\n';
+    const v = validateFiles(files, demo.dirs);
+    expect(v.model).toBeNull();
+    expect(v.tree).not.toBeNull();
+    const l = pickLists(v);
+    expect(l.services).toContain('crm-orders-custom');
+    expect(l.services).not.toContain('crm-orders');
+  });
+});
+
 describe('pickLists', () => {
   const l = pickLists(validateFiles(demo.files, demo.dirs));
   it('lists demo values', () => {

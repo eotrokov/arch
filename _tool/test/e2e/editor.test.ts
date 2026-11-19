@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
+import { CHROME, describeChrome } from './chrome.js';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
@@ -13,9 +14,6 @@ import { FAKE_TOKEN, startFakeGitLab, type FakeGitLab } from '../fake-gitlab.js'
 
 // Редактор в headless Chrome против фальшивого GitLab. Раскладка как на Pages: public/index.html — просмотрщик,
 // public/editor/ — редактор (config.json отдаётся сервером, model.json лежит рядом для запасного режима).
-const CHROME = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const hasChrome = existsSync(CHROME);
-if (!hasChrome) console.warn(`[e2e] Chrome не найден (${CHROME}): тесты редактора пропущены. Укажите CHROME_PATH.`);
 /** Каталог для скриншотов шагов «Связи» и «Проверка и MR» (для ревью; в тестах не обязателен). */
 const SCREENS = process.env.ARCH_E2E_SCREENS;
 
@@ -27,7 +25,7 @@ const INITIAL_COMMIT = sha1('c1');
 
 type Commit = { branch: string; start_branch?: string; start_sha?: string; commit_message: string; actions: { action: string; file_path: string; content?: string; last_commit_id?: string }[] };
 
-describe.skipIf(!hasChrome)('редактор: сценарии в Chrome с фальшивым GitLab', () => {
+describeChrome('редактор: сценарии в Chrome с фальшивым GitLab', () => {
   const demo = readModelFiles('examples/demo');
   let tmp: string;
   let pub: string;
@@ -269,8 +267,11 @@ describe.skipIf(!hasChrome)('редактор: сценарии в Chrome с ф�
 
     // (а) в main изменён другой файл: коммита нет, модель перезагружена, правка применена заново
     fake!.setFile('sales/pay/services/billing.yaml', `${demo['sales/pay/services/billing.yaml']}# чужая правка\n`);
+    await page.$eval('#mrTitle', (el) => { (el as HTMLInputElement).value = 'Мой заголовок'; el.dispatchEvent(new Event('input', { bubbles: true })); });
     await page.click('#createMr');
     await moved(page);
+    // правленый заголовок переживает автоматическую перезагрузку: пользователю его же и отправлять заново
+    expect(await page.$eval('#mrTitle', (el) => (el as HTMLInputElement).value)).toBe('Мой заголовок');
     expect(await text(page, '#mrStatus')).toContain('модель перезагружена, проверьте изменения и отправьте снова');
     expect(commits()).toEqual([]);
     expect(await text(page, '#cartCount')).toBe('Изменений: 1');

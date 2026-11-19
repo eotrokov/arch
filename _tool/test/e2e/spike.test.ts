@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { CHROME, describeChrome } from './chrome.js';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
@@ -7,11 +8,8 @@ import { resolve } from 'node:path';
 import puppeteer, { type Browser, type Page } from 'puppeteer-core';
 import { startFakeGitLab, type FakeGitLab } from '../fake-gitlab.js';
 
-const CHROME = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const hasChrome = existsSync(CHROME);
-if (!hasChrome) console.warn(`[e2e] Chrome не найден (${CHROME}): spike-тест пропущен. Укажите CHROME_PATH.`);
 
-describe.skipIf(!hasChrome)('spike: страница проверки на фейковом GitLab', () => {
+describeChrome('spike: страница проверки на фейковом GitLab', () => {
   let fake: FakeGitLab;
   let site: Server;
   let browser: Browser;

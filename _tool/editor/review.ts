@@ -3,7 +3,7 @@
 import { isSharedPath, saveDraft, type Change } from './cart.js';
 import { h } from './fields.js';
 import { GitLabError, type GitLabClient } from './gitlab/api.js';
-import type { AppState } from './main.js';
+import type { AppState } from './state.js';
 import type { Validation } from './model.js';
 import { branchName, commitActions, defaultTitle, mrDescription, randomSuffix, zipChanges } from './mr.js';
 import { GraphView } from '../viewer/render.js';
@@ -199,6 +199,10 @@ const CONTEXT = 3;
 
 /** Правленые вручную заголовок и описание живут между перерисовками шага (до успешной отправки). */
 let edited: { title?: string; description?: string } = {};
+/** Сброс правок заголовка/описания: после «Обновить» пользователя, при пустой корзине и после создания MR. */
+export function resetReviewEdits(): void { edited = {}; }
+/** Граф предпросмотра прошлой отрисовки: при новой его cytoscape уничтожается, иначе утекает. */
+let previewGraph: GraphView | null = null;
 let view: ViewKind = 'containers';
 let scopeIdx = 0;
 
@@ -267,6 +271,8 @@ function checksBlock(sum: ReturnType<typeof reviewSummary>, host: ReviewHost): N
 }
 
 function previewBlock(changes: Change[], v: Validation): Node[] {
+  previewGraph?.destroy();
+  previewGraph = null;
   const title = h('h3', {}, 'Предпросмотр');
   if (!v.model) return [title, h('p', { class: 'empty' }, 'Предпросмотр недоступен: модель с изменениями не собирается — исправьте ошибки выше.')];
   const model = v.model;
@@ -294,7 +300,7 @@ function previewBlock(changes: Change[], v: Validation): Node[] {
       if (tries++ < 10) requestAnimationFrame(draw); // шаг перерисован раньше вставки — не крутимся вечно
       return;
     }
-    graph ??= new GraphView(document, cyEl, { onSelect: () => {}, onExpand: () => {} });
+    graph ??= previewGraph = new GraphView(document, cyEl, { onSelect: () => {}, onExpand: () => {} });
     const key = `${view}|${scope.kind}:${'id' in scope ? scope.id : ''}|${changes.map((c) => c.path).join(',')}`;
     graph.show(key, g, { view, sensitiveSegments }, () => { document.body.dataset.preview = `${view}|${g.nodes.length}`; });
   };
@@ -357,6 +363,7 @@ function diffBlock(changes: Change[], files: Record<string, string>, host: Revie
 function mrBlock(changes: Change[], v: Validation, canSubmit: boolean, host: ReviewHost, initial?: Status): Node[] {
   const app = host.app();
   const offline = app.mode !== 'gitlab';
+  if (!changes.length) resetReviewEdits(); // другой набор правок — другой MR: прежний заголовок не переносится
   const title = h('input', { class: 'in', id: 'mrTitle', 'aria-label': 'Заголовок' });
   title.value = edited.title ?? defaultTitle(changes);
   title.addEventListener('input', () => { edited.title = title.value; });
@@ -393,7 +400,7 @@ function mrBlock(changes: Change[], v: Validation, canSubmit: boolean, host: Rev
     host.busy(true);
     try {
       const { webUrl } = await submit(now, title.value, desc.value, randomSuffix, host.storage);
-      edited = {};
+      resetReviewEdits();
       host.busy(false);
       host.done(webUrl);
     } catch (e) {
